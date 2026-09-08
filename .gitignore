@@ -1,0 +1,10 @@
+/*
+!/.gitignore
+!/package.json
+!/README.md
+!/src/
+!/test/
+/src/*
+!/src/*.ts
+/test/*
+!/test/*.mjs
