@@ -18,13 +18,13 @@ Use the session that owns your Companion work. Installation does not create sche
 
 | Command | Opens or controls |
 | --- | --- |
-| `/companion` | Unread updates and all saved reports |
+| `/companion` | Start Companion (equivalent to `/companion start`) |
+| `/companion start` | Resume Companion-paused schedules, then invoke `/companion-prompt` |
 | `/companion updates` | Unread actionable updates |
 | `/companion reports` | All saved reports, including those already read |
 | `/companion stop` | Stop this session's approved recurring Companion schedules |
-| `/companion start` | Resume only unchanged, still-approved schedules stopped by Companion |
 
-Stopping preserves history and the footer. A firing delivery finishes without being aborted; Companion then disables its next recurrence. Unfinished stop requests survive reloads and resume in their owning session.
+Start uses Pi prompt-template expansion to invoke `/companion-prompt`. It resumes only unchanged, still-approved schedules stopped by Companion; with no saved pause receipts, it does not require schedule control. Stopping preserves history and the footer. A firing delivery finishes without being aborted; Companion then disables its next recurrence. Unfinished stop requests survive reloads and resume in their owning session.
 
 Schedule control requires the existing `@jl1990/pi-scheduler` package. A task must belong to the exact current session (`scope: session`), recur, and have a name exactly matching a `##` heading in the local `~/.companion-schedules.md`. Other sessions, cwd/global tasks, one-shot tasks, canceled work, and unrelated names are excluded. Keep canceled work out of that source of truth.
 

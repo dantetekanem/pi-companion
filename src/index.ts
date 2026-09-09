@@ -48,17 +48,28 @@ export function registerCompanion(pi: ExtensionAPI, paths: Paths): void {
     },
   });
   pi.registerCommand('companion', {
-    description: 'Open Companion, or updates | reports | start | stop (session-owned schedules).',
-    getArgumentCompletions: prefix => ['updates', 'reports', 'start', 'stop'].filter(value => value.startsWith(prefix)).map(value => ({ value, label: value })),
+    description: 'Start Companion, or updates | reports | stop (session-owned schedules).',
+    getArgumentCompletions: prefix => {
+      const items = ['updates', 'reports', 'start', 'stop'].filter(value => value.startsWith(prefix)).map(value => ({ value, label: value }));
+      return items.length ? items : null;
+    },
     handler: async (args, ctx) => {
       const action = args.trim(), token = generation;
       const active = () => generation === token;
       try {
-        if (action === 'start' || action === 'stop') {
-          await runControl(action, ctx);
+        if (action === '' || action === 'start') {
+          try {
+            if (storeFor(ctx).load().paused.length) await runControl('start', ctx);
+          } finally {
+            if (active()) pi.sendUserMessage('/companion-prompt', { expandPromptTemplates: true, deliverAs: 'followUp' });
+          }
           return;
         }
-        if (!['', 'updates', 'reports'].includes(action)) throw new Error('Usage: /companion [updates|reports|start|stop]');
+        if (action === 'stop') {
+          await runControl('stop', ctx);
+          return;
+        }
+        if (!['updates', 'reports'].includes(action)) throw new Error('Usage: /companion [updates|reports|start|stop]');
         if (ctx.mode !== 'tui') throw new Error('Companion views require Pi interactive mode.');
         if (viewing) throw new Error('A Companion view is already open.');
         viewing = true;
