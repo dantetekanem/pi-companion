@@ -175,6 +175,27 @@ test('start and bare companion send bundled instructions directly; autocomplete 
   assert.equal(h.selections.length, 0);
 });
 
+test('footer counts current-session active schedules and refreshes after agent work', async t => {
+  const scheduler = schedulerFixture(t);
+  const runtime = harness(t, 'owner', scheduler);
+  await runtime.events.get('session_start')({}, runtime.ctx);
+  assert.equal(runtime.statuses.at(-1)[1], 'Companion · 1 schedule');
+  scheduler.tasks.push({ ...scheduler.tasks[0], id: 'task_running', status: 'running' });
+  scheduler.save();
+  await runtime.events.get('agent_end')({}, runtime.ctx);
+  assert.equal(runtime.statuses.at(-1)[1], 'Companion · 2 schedules');
+  await runtime.ingest(update());
+  assert.equal(runtime.statuses.at(-1)[1], 'Companion · 2 schedules · 1 update');
+  scheduler.tasks[0].enabled = false;
+  scheduler.tasks.at(-1).status = 'failed';
+  scheduler.save();
+  await runtime.events.get('agent_end')({}, runtime.ctx);
+  assert.equal(runtime.statuses.at(-1)[1], 'Companion · 0 schedules · 1 update');
+  writeFileSync(scheduler.options.schedulerFile, '{broken');
+  await runtime.events.get('agent_end')({}, runtime.ctx);
+  assert.equal(runtime.statuses.at(-1)[1], 'Companion · 1 update');
+});
+
 test('sessions independently start Companion and stop only their own schedules', async t => {
   const scheduler = schedulerFixture(t);
   writeFileSync(join(scheduler.dir, 'owner.json'), JSON.stringify({ version: 1, sessionId: 'retired-session' }));
@@ -188,10 +209,11 @@ test('sessions independently start Companion and stop only their own schedules',
     await runtime.command('start');
     assert.equal(runtime.messages.length, 1);
     await runtime.ingest(report());
-    assert.equal(runtime.statuses.at(-1)[1], 'Companion · 1 report');
+    assert.equal(runtime.statuses.at(-1)[1], 'Companion · 1 schedule · 1 report');
   }
   await second.command('stop');
   assert.deepEqual(scheduler.sent, ['/schedule-disable task_other']);
+  assert.equal(second.statuses.at(-1)[1], 'Companion · 0 schedules · 1 report');
   assert.equal(scheduler.tasks[0].enabled, true);
   await first.command('stop');
   assert.deepEqual(scheduler.sent, ['/schedule-disable task_other', '/schedule-disable task_owned']);
@@ -297,7 +319,7 @@ test('successful session recovery completes the stop and preserves saved results
   const runtime = harness(t, 'owner', h);
   Object.assign(runtime.pi, { getCommands: h.pi.getCommands, sendUserMessage: h.pi.sendUserMessage });
   await runtime.ingest(report('recovery-history'));
-  assert.equal(runtime.statuses.at(-1)[1], 'Companion · 1 report');
+  assert.equal(runtime.statuses.at(-1)[1], 'Companion · 1 schedule · 1 report');
   const stopping = runtime.command('stop');
   assert.equal(new Store(h.dir, 'owner').load().stopping.length, 1);
   await runtime.events.get('session_shutdown')({}, runtime.ctx);
@@ -311,7 +333,7 @@ test('successful session recovery completes the stop and preserves saved results
   await new Promise(setImmediate);
   assert.equal(h.store.load().stopping.length, 0);
   assert.equal(h.store.load().paused.length, 1);
-  assert.equal(runtime.statuses.at(-1)[1], 'Companion · 1 report');
+  assert.equal(runtime.statuses.at(-1)[1], 'Companion · 0 schedules · 1 report');
   await other.command('start');
   assert.equal(other.messages.length, 1);
 });
@@ -334,7 +356,7 @@ test('failed session recovery reports the pending stop and preserves its footer'
   const [message] = await notified;
   assert.match(message, /stop remains pending/);
   assert.equal(h.store.load().stopping.length, 1);
-  assert.equal(runtime.statuses.at(-1)[1], 'Companion · 1 report');
+  assert.equal(runtime.statuses.at(-1)[1], 'Companion · 1 schedule · 1 report');
 });
 
 test('immediate shutdown/start chains recovery after the interrupted control clears', async t => {

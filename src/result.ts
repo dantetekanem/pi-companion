@@ -31,10 +31,11 @@ export function validateResult(value: unknown): Result {
 export function label(item: Result): string {
   return `${item.title}${item.kind === 'report' ? ' report' : ''}${incomplete(item) ? ' incomplete' : ''}`;
 }
-export function footer(state: State): string | undefined {
+export function footer(state: State, schedules?: number): string | undefined {
   const counts = ['update', 'report'].flatMap(kind => {
     const count = state.items.filter(item => item.kind === kind && !item.readAt).length;
     return count ? [`${count} ${kind}${count === 1 ? '' : 's'}`] : [];
   });
+  if (schedules !== undefined) counts.unshift(`${schedules} schedule${schedules === 1 ? '' : 's'}`);
   return counts.length ? `Companion · ${counts.join(' · ')}` : undefined;
 }

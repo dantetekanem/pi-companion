@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { footer, label, ResultSchema } from './result.ts';
 import { Store } from './store.ts';
 import { Reader } from './reader.ts';
-import { controlSchedules, type SchedulerPaths } from './scheduler.ts';
+import { controlSchedules, countSchedules, type SchedulerPaths } from './scheduler.ts';
 
 type Paths = SchedulerPaths & { root: string };
 export function registerCompanion(pi: ExtensionAPI, paths: Paths): void {
@@ -15,7 +15,7 @@ export function registerCompanion(pi: ExtensionAPI, paths: Paths): void {
   const sessionId = (ctx: ExtensionContext) => ctx.sessionManager.getSessionId();
   const storeFor = (ctx: ExtensionContext) => new Store(paths.root, sessionId(ctx));
   const refresh = (ctx: ExtensionContext) => {
-    if (ctx.hasUI) ctx.ui.setStatus('companion', footer(storeFor(ctx).load()));
+    if (ctx.hasUI) ctx.ui.setStatus('companion', footer(storeFor(ctx).load(), countSchedules(ctx, paths)));
   };
   const isCompanionSchedule = (name: unknown) => {
     if (typeof name !== 'string') return false;
@@ -32,7 +32,9 @@ export function registerCompanion(pi: ExtensionAPI, paths: Paths): void {
       if (generation !== token) return;
     }
     const operation = controlSchedules(action, pi, ctx, storeFor(ctx), { ...paths, isActive: () => generation === token })
-      .then(message => { if (generation === token && ctx.hasUI) ctx.ui.notify(message, 'info'); });
+      .then(message => {
+        if (generation === token && ctx.hasUI) { refresh(ctx); ctx.ui.notify(message, 'info'); }
+      });
     const tracked: Promise<void> = operation.finally(() => { if (control === tracked) control = undefined; });
     control = tracked;
     await tracked;
@@ -46,6 +48,10 @@ export function registerCompanion(pi: ExtensionAPI, paths: Paths): void {
       });
     } catch { if (ctx.hasUI) ctx.ui.setStatus('companion', 'Companion · storage unreadable'); }
   });
+  pi.on('agent_end', (_event, ctx) => {
+    try { refresh(ctx); }
+    catch { if (ctx.hasUI) ctx.ui.setStatus('companion', 'Companion · storage unreadable'); }
+  });
   pi.on('session_shutdown', (_event, ctx) => { generation++; if (ctx.hasUI) ctx.ui.setStatus('companion', undefined); });
   pi.on('tool_call', (event, ctx) => {
     if (event.toolName !== 'schedule_task') return;
@@ -55,7 +61,7 @@ export function registerCompanion(pi: ExtensionAPI, paths: Paths): void {
   });
   pi.registerTool({
     name: 'companion_save', label: 'Save Companion result',
-    description: 'Save a finalized update or compiled report in this session. Use a stable ID per result/run. Only actionable findings, material changes or decision blockers are updates. Routine no-change goes in reports. Include every expected source/task in checks, including failed, incomplete and not_run checks; never infer collection from scheduler delivery. Incomplete results may expose blockers, not successful collection. Max body 32000 chars, 40 checks. Does not collect, schedule or mark read.',
+    description: 'Publish only information the user needs to read: a new action, decision, material change or actionable blocker, a useful new synthesis, or an explicitly requested report. Routine no-change, individual feedback ratings and repeated findings stay in notes, not reports. Compare prior publications; do not duplicate a finding across runs or updates/reports. Use a stable ID per finding/synthesis version and reuse it on retries. Lead with the finding, keep it concise, and include every expected check in scope, including failures and gaps. Scheduler delivery is not collection. Max body 32000 chars, 40 checks. Does not collect, schedule or mark read.',
     parameters: ResultSchema,
     async execute(_id, params, signal, _onUpdate, ctx) {
       signal?.throwIfAborted();

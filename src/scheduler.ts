@@ -9,6 +9,19 @@ const configuration = ['name', 'action', 'type', 'schedule', 'scope', 'sessionFi
 const signature = (task: Task) => createHash('sha256').update(JSON.stringify(configuration.map(key => task[key]))).digest('hex');
 const firing = (task: Task) => task.status === 'running' || Boolean(task.runOwner);
 export type SchedulerPaths = { schedulerFile: string; schedulesFile: string; isActive?: () => boolean };
+export function countSchedules(ctx: ExtensionContext, paths: SchedulerPaths): number | undefined {
+  const sessionFile = ctx.sessionManager.getSessionFile();
+  if (!sessionFile) return;
+  try {
+    const names = new Set([...readFileSync(paths.schedulesFile, 'utf8').matchAll(/^## (.+)$/gm)].map(match => match[1].trim()));
+    const data = JSON.parse(readFileSync(paths.schedulerFile, 'utf8'));
+    const tasks: Task[] = data.tasks ?? data;
+    if (!Array.isArray(tasks)) return;
+    return tasks.filter(task => task.scope === 'session' && task.sessionFile === sessionFile
+      && ['cron', 'interval'].includes(task.type) && names.has(task.name) && /^task_[a-zA-Z0-9_]+$/.test(task.id)
+      && task.enabled === true && ['pending', 'running'].includes(task.status)).length;
+  } catch { return undefined; }
+}
 export async function controlSchedules(action: 'start' | 'stop' | 'finish-stop', pi: ExtensionAPI, ctx: ExtensionContext, store: Store, paths: SchedulerPaths): Promise<string> {
   const stopping = action !== 'start', verb = stopping ? 'disable' : 'enable';
   const commands = pi.getCommands().filter(c => c.name.replace(/:\d+$/, '') === `schedule-${verb}`

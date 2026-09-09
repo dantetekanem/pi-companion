@@ -2,7 +2,9 @@
 
 Saved updates and reports for Pi, without hunting through scheduled-task messages.
 
-The footer shows unread results: `Companion · 2 updates · 1 report`. Open an item to read it, press `r` to mark it read, or Escape to leave it unread. Read state survives reloads.
+The footer shows active schedules and unread results: `Companion · 3 schedules · 2 updates · 1 report`. Open an item to read it, press `r` to mark it read, or Escape to leave it unread. Read state survives reloads.
+
+The schedule count includes enabled, pending or running recurring Companion tasks in this session whose names match the registry. Paused, canceled, finished, unrelated, and other sessions' tasks are excluded. The count refreshes on session load, after agent runs, and after Companion controls finish; it does not poll for external changes. If the scheduler or registry cannot be read, the count is omitted rather than shown as zero.
 
 ## Install locally
 
@@ -34,13 +36,15 @@ Companion uses the scheduler's commands and confirms their saved state. It does 
 
 ## Save a result
 
-The agent calls `companion_save` after finishing a check or compiling a digest. The tool validates and saves the result before updating the footer. A scheduler firing, a delivered prompt, or an ordinary assistant reply is not a saved report.
+The agent calls `companion_save` only when it has something the user needs to read: a new action or decision, material change, useful synthesis, or an explicitly requested report. Completing a check alone does not justify publication. The tool validates and saves the result before updating the footer. A scheduler firing, a delivered prompt, or an ordinary assistant reply is not a saved report.
 
 Supply `id`, `kind` (`update` or `report`), `final: true`, `title`, `body`, and `checks`. Each check needs `source`, `outcome`, and `detail`. Outcomes are `findings`, `no_change`, `failed`, `incomplete`, or `not_run`. Include every expected source or task, even those that failed or never ran.
 
-Updates also need a `reason`: `action`, `material`, or `blocker`. Routine no-new-email and other no-change results belong inside reports, not separate updates. The agent decides what is useful and supplies the evidence; the extension does not audit coverage or discover missed runs. If a run saves nothing, it creates no notification. The next digest must account for it.
+Updates also need a `reason`: `action`, `material`, or `blocker`. Routine no-change results, individual feedback ratings, repeated findings, and non-actionable collection failures stay in notes. Feedback reviews group related evidence into a new problem or recommendation worth considering, not a report per rating. An explicitly requested report may confirm no change.
 
-For example, this finalized report records an incomplete check:
+Before publishing, the agent compares prior publications in notes and omits unchanged findings, including findings already published in the other view. A follow-up explains the material change or an approved reminder. Titles name the finding; bodies lead with the outcome and include only necessary context, evidence links, and any next action. The agent decides relevance and semantic duplication; the extension does not enforce either or audit collection. A run without a saved item creates no unread notification, while its results and gaps remain in notes.
+
+For example, an explicitly requested reading status report can disclose an incomplete check:
 
 ```json
 {
@@ -58,7 +62,7 @@ For example, this finalized report records an incomplete check:
 
 It appears as `Reading report incomplete`. Available means a finalized result was saved, not that collection succeeded. An incomplete blocker can be an update when the user needs to act.
 
-IDs are stable per result/run: up to 128 letters, digits, dots, colons, underscores or hyphens, starting with a letter or digit. Retrying identical content with the same ID preserves read state and avoids duplicates. Conflicting content is rejected; use a new ID for a correction. Keep titles short, bodies within 32,000 characters, and reports within 40 checks. Opening or saving never marks a result read. Read updates leave the unread view but stay stored; reports remain browseable.
+IDs are stable per published finding or synthesis version: up to 128 letters, digits, dots, colons, underscores or hyphens, starting with a letter or digit. Retrying identical content with the same ID preserves read state and avoids duplicates. Conflicting content is rejected; use a new ID for a correction. Keep titles short, bodies within 32,000 characters, and reports within 40 checks. Opening or saving never marks a result read. Read updates leave the unread view but stay stored; reports remain browseable.
 
 ## Storage and limits
 
