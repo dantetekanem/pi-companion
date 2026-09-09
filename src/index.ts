@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { footer, label, ResultSchema } from './result.ts';
 import { Store } from './store.ts';
 import { Reader } from './reader.ts';
+import { companionInstructions } from './instructions.ts';
 import { controlSchedules, type SchedulerPaths } from './scheduler.ts';
 
 type Paths = SchedulerPaths & { root: string };
@@ -79,7 +80,7 @@ export function registerCompanion(pi: ExtensionAPI, paths: Paths): void {
           try {
             if (storeFor(ctx).load().paused.length) await runControl('start', ctx);
           } finally {
-            if (active()) pi.sendUserMessage('/companion-prompt', { expandPromptTemplates: true, deliverAs: 'followUp' });
+            if (active()) pi.sendUserMessage(companionInstructions, { deliverAs: 'followUp' });
           }
           return;
         }

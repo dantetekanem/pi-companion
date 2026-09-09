@@ -20,6 +20,7 @@ const { footer, label, validateResult } = await jiti.import('../src/result.ts');
 const { Reader } = await jiti.import('../src/reader.ts');
 const { controlSchedules } = await jiti.import('../src/scheduler.ts');
 const { registerCompanion } = await jiti.import('../src/index.ts');
+const { companionInstructions } = await jiti.import('../src/instructions.ts');
 const { visibleWidth } = await jiti.import(aliases['@earendil-works/pi-tui']);
 const report = (id = 'digest-1', outcome = 'no_change') => ({
   id, kind: 'report', final: true, title: 'Reading', body: 'Useful result with evidence.',
@@ -161,15 +162,15 @@ test('direct views filter updates/reports; only an explicit reader action marks 
   assert.equal(new Store(h.dir, 'owner').load().items.find(i => i.kind === 'report').readAt, undefined);
 });
 
-test('start and bare companion invoke the Companion prompt template; autocomplete follows Pi\'s null contract', async t => {
+test('start and bare companion send bundled instructions directly; autocomplete follows Pi\'s null contract', async t => {
   const h = harness(t), command = h.commands.get('companion');
   assert.deepEqual(command.getArgumentCompletions('')?.map(item => item.value), ['updates', 'reports', 'start', 'stop']);
   assert.deepEqual(command.getArgumentCompletions('rep')?.map(item => item.value), ['reports']);
   assert.equal(command.getArgumentCompletions('missing'), null);
   await h.command('start'); await h.command('');
   assert.deepEqual(h.messages, [
-    { content: '/companion-prompt', options: { expandPromptTemplates: true, deliverAs: 'followUp' } },
-    { content: '/companion-prompt', options: { expandPromptTemplates: true, deliverAs: 'followUp' } },
+    { content: companionInstructions, options: { deliverAs: 'followUp' } },
+    { content: companionInstructions, options: { deliverAs: 'followUp' } },
   ]);
   assert.equal(h.selections.length, 0);
 });
@@ -181,7 +182,7 @@ test('sessions independently start Companion and stop only their own schedules',
   for (const runtime of [first, second]) {
     runtime.pi.getCommands = scheduler.pi.getCommands;
     runtime.pi.sendUserMessage = (content, options) => {
-      if (content === '/companion-prompt') runtime.messages.push({ content, options });
+      if (content === companionInstructions) runtime.messages.push({ content, options });
       else scheduler.pi.sendUserMessage(content, options);
     };
     await runtime.command('start');
@@ -352,20 +353,20 @@ test('immediate shutdown/start chains recovery after the interrupted control cle
   assert.equal(h.store.load().stopping.length, 0); assert.equal(h.store.load().paused.length, 1);
 });
 
-test('start resumes saved schedules before injecting the Companion prompt template', async t => {
+test('start resumes saved schedules before sending bundled instructions', async t => {
   const h = schedulerFixture(t);
   await controlSchedules('stop', h.pi, h.ctx, h.store, h.options);
   const runtime = harness(t, 'owner', h), sequence = [], dispatch = h.pi.sendUserMessage;
   runtime.pi.getCommands = h.pi.getCommands;
   runtime.pi.sendUserMessage = (content, options) => {
     sequence.push(content);
-    if (content === '/companion-prompt') runtime.messages.push({ content, options });
+    if (content === companionInstructions) runtime.messages.push({ content, options });
     else dispatch(content, options);
   };
   await runtime.command('start');
-  assert.deepEqual(sequence, ['/schedule-enable task_owned', '/companion-prompt']);
+  assert.deepEqual(sequence, ['/schedule-enable task_owned', companionInstructions]);
   assert.equal(h.store.load().paused.length, 0);
-  assert.deepEqual(runtime.messages, [{ content: '/companion-prompt', options: { expandPromptTemplates: true, deliverAs: 'followUp' } }]);
+  assert.deepEqual(runtime.messages, [{ content: companionInstructions, options: { deliverAs: 'followUp' } }]);
 });
 
 test('a delivery racing the disable command cannot re-enable the stopped schedule', async t => {

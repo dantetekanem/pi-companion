@@ -19,12 +19,14 @@ pi -e ./src/index.ts
 | Command | Opens or controls |
 | --- | --- |
 | `/companion` | Start Companion (equivalent to `/companion start`) |
-| `/companion start` | Resume Companion-paused schedules, then invoke `/companion-prompt` |
+| `/companion start` | Resume Companion-paused schedules, then send the bundled Companion instructions |
 | `/companion updates` | Unread actionable updates |
 | `/companion reports` | All saved reports, including those already read |
 | `/companion stop` | Stop this session's approved recurring Companion schedules |
 
-Start uses Pi prompt-template expansion to invoke `/companion-prompt`. It resumes only unchanged, still-approved schedules stopped by Companion; with no saved pause receipts, it does not require schedule control. Stop preserves history, the unread-result footer, and safe schedule-control receipts. A firing delivery finishes without being aborted; Companion then disables its next recurrence. Unfinished stop requests resume in the same session after reloads.
+Start sends the instructions bundled in `src/instructions.ts` directly to the agent; no separately installed prompt is needed. It resumes only unchanged, still-approved schedules stopped by Companion; with no saved pause receipts, it does not require schedule control. Stop preserves history, the unread-result footer, and safe schedule-control receipts. A firing delivery finishes without being aborted; Companion then disables its next recurrence. Unfinished stop requests resume in the same session after reloads.
+
+`~/.companion-schedules.md` is the source of truth for recurring tasks, cadence, timezone, checklists, and referenced working instructions. The agent reads it each run and uses relevant `~/.companion-notes/` as the previous-run baseline. A missing baseline means a first run, not a setup blocker; the scheduler does not need to retain collection summaries. Task-specific content stays in the registry rather than the extension.
 
 Schedule control requires the existing `@jl1990/pi-scheduler` package. A task must belong to the exact current session (`scope: session`), recur, and have a name exactly matching a `##` heading in the local `~/.companion-schedules.md`. Other sessions, cwd/global tasks, one-shot tasks, canceled work, and unrelated names are excluded. Keep canceled work out of that source of truth. The extension blocks identifiable Companion `schedule_task` calls when they use another scope. Pi exposes this enforcement at tool calls, so direct scheduler slash commands and tasks without a registry-matching name remain outside the Companion gate.
 
