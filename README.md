@@ -24,7 +24,7 @@ pi -e ./src/index.ts
 | `/companion reports` | All saved reports, including those already read |
 | `/companion stop` | Stop this session's approved recurring Companion schedules |
 
-Start sends the instructions bundled in `src/instructions.ts` directly to the agent; no separately installed prompt is needed. It resumes only unchanged, still-approved schedules stopped by Companion; with no saved pause receipts, it does not require schedule control. Stop preserves history, the unread-result footer, and safe schedule-control receipts. A firing delivery finishes without being aborted; Companion then disables its next recurrence. Unfinished stop requests resume in the same session after reloads.
+Start reads the extension's `src/prompt.md` and injects its contents directly into the agent; no separately installed prompt is needed. It resumes only unchanged, still-approved schedules stopped by Companion; with no saved pause receipts, it does not require schedule control. Stop preserves history, the unread-result footer, and safe schedule-control receipts. A firing delivery finishes without being aborted; Companion then disables its next recurrence. Unfinished stop requests resume in the same session after reloads.
 
 `~/.companion-schedules.md` is the source of truth for recurring tasks, cadence, timezone, checklists, and referenced working instructions. The agent reads it each run and uses relevant `~/.companion-notes/` as the previous-run baseline. A missing baseline means a first run, not a setup blocker; the scheduler does not need to retain collection summaries. Task-specific content stays in the registry rather than the extension.
 

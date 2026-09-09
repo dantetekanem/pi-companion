@@ -6,5 +6,6 @@
 !/test/
 /src/*
 !/src/*.ts
+!/src/prompt.md
 /test/*
 !/test/*.mjs

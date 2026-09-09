@@ -20,7 +20,7 @@ const { footer, label, validateResult } = await jiti.import('../src/result.ts');
 const { Reader } = await jiti.import('../src/reader.ts');
 const { controlSchedules } = await jiti.import('../src/scheduler.ts');
 const { registerCompanion } = await jiti.import('../src/index.ts');
-const { companionInstructions } = await jiti.import('../src/instructions.ts');
+const companionInstructions = readFileSync(new URL('../src/prompt.md', import.meta.url), 'utf8');
 const { visibleWidth } = await jiti.import(aliases['@earendil-works/pi-tui']);
 const report = (id = 'digest-1', outcome = 'no_change') => ({
   id, kind: 'report', final: true, title: 'Reading', body: 'Useful result with evidence.',
