@@ -1,8 +1,11 @@
 import { Type, type Static } from 'typebox';
 import { Check } from 'typebox/value';
 
-const text = (maxLength: number, multiline = false) => Type.String({ minLength: 1, maxLength,
-  pattern: multiline ? '^(?=[\\s\\S]*\\S)[^\\x00-\\x08\\x0b-\\x1f\\x7f-\\x9f]+$' : '^(?=[\\s\\S]*\\S)[^\\x00-\\x1f\\x7f-\\x9f]+$' });
+const text = (maxLength: number, multiline = false) => {
+  const controls = multiline ? '\\x00-\\x08\\x0b-\\x1f\\x7f-\\x9f' : '\\x00-\\x1f\\x7f-\\x9f';
+  const allowed = `[^${controls}]`;
+  return Type.String({ minLength: 1, maxLength, pattern: `^${allowed}*[^\\s${controls}]${allowed}*$` });
+};
 const enumeration = <T extends string>(values: T[]) => Type.Unsafe<T>({ type: 'string', enum: values });
 export const ResultSchema = Type.Object({
   id: Type.String({ pattern: '^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$' }),

@@ -38,8 +38,11 @@ test('installed Pi loader discovers the real extension without starting a sessio
   const { loadExtensions } = await import(join(root, 'dist/core/extensions/loader.js'));
   const loaded = await loadExtensions([fileURLToPath(new URL('../src/index.ts', import.meta.url))], dir);
   assert.deepEqual(loaded.errors, []);
-  assert.ok(loaded.extensions[0].tools.has('companion_save'));
+  const tool = loaded.extensions[0].tools.get('companion_save');
+  assert.ok(tool);
   assert.ok(loaded.extensions[0].commands.has('companion'));
+  const schema = JSON.stringify(tool.definition.parameters);
+  for (const lookaround of ['(?=', '(?!', '(?<=', '(?<!']) assert.equal(schema.includes(lookaround), false);
 });
 
 test('save survives a new store instance; opening is not reading; explicit read persists', t => {
@@ -91,10 +94,10 @@ test('explicit incomplete blocker can be an update, without claiming collection 
 
 test('invalid input, unsafe terminal controls and malformed storage fail closed', t => {
   const { store } = fixture(t);
-  for (const patch of [{ title: '\u001b[31munsafe' }, { title: 'Trailing newline\n' }, { id: 'id\n' }, { body: 'x'.repeat(33000) }, { sessionId: 'other' }, { title: '   ' }]) {
+  for (const patch of [{ title: '\u001b[31munsafe' }, { title: 'Trailing newline\n' }, { id: 'id\n' }, { body: 'x'.repeat(33000) }, { sessionId: 'other' }, { title: '   ' }, { body: ' \n\t' }]) {
     assert.throws(() => store.ingest({ ...report(), ...patch }));
   }
-  store.ingest(report());
+  store.ingest({ ...report(), body: 'Useful result\nwith evidence.' });
   writeFileSync(store.file, '{');
   assert.throws(() => store.load());
   assert.throws(() => store.ingest(update()));
