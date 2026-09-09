@@ -18,7 +18,7 @@ export type Result = Static<typeof ResultSchema>;
 export type Saved = Result & { savedAt: string; readAt?: string };
 export type StopRequest = { id: string; signature: string };
 export type Paused = StopRequest & { disabledAt: string };
-export type State = { version: 1; items: Saved[]; paused: Paused[]; stopping: StopRequest[] };
+export type State = { version: 1; started?: boolean; items: Saved[]; paused: Paused[]; stopping: StopRequest[] };
 export const incomplete = (item: Result) => item.checks.some(c => ['failed', 'incomplete', 'not_run'].includes(c.outcome));
 export function validateResult(value: unknown): Result {
   if (!Check(ResultSchema, value)) throw new Error('Invalid Companion result: supply a final result with explicit source checks.');
@@ -32,10 +32,6 @@ export function label(item: Result): string {
   return `${item.title}${item.kind === 'report' ? ' report' : ''}${incomplete(item) ? ' incomplete' : ''}`;
 }
 export function footer(state: State, schedules?: number): string | undefined {
-  const counts = ['update', 'report'].flatMap(kind => {
-    const count = state.items.filter(item => item.kind === kind && !item.readAt).length;
-    return count ? [`${count} ${kind}${count === 1 ? '' : 's'}`] : [];
-  });
-  if (schedules !== undefined) counts.unshift(`${schedules} schedule${schedules === 1 ? '' : 's'}`);
-  return counts.length ? `Companion · ${counts.join(' · ')}` : undefined;
+  if (state.started !== true) return undefined;
+  return schedules === undefined ? 'Companion' : `Companion · ${schedules} schedule${schedules === 1 ? '' : 's'}`;
 }

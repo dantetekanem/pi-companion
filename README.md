@@ -2,7 +2,7 @@
 
 Saved updates and reports for Pi, without hunting through scheduled-task messages.
 
-The footer shows active schedules and unread results: `Companion · 3 schedules · 2 updates · 1 report`. Open an item to read it, press `r` to mark it read, or Escape to leave it unread. Read state survives reloads.
+The footer shows only active schedules: `Companion · 3 schedules`, and only after `/companion` or `/companion start` has run in that session. This started state survives reloads; existing sessions need to run the command once after upgrading. Saved results do not add footer counters. Open an item to read it, press `r` to mark it read, or Escape to leave it unread. Read state survives reloads.
 
 The schedule count includes enabled, pending or running recurring Companion tasks in this session whose names match the registry. Paused, canceled, finished, unrelated, and other sessions' tasks are excluded. The count refreshes on session load, after agent runs, and after Companion controls finish; it does not poll for external changes. If the scheduler or registry cannot be read, the count is omitted rather than shown as zero.
 
@@ -26,7 +26,7 @@ pi -e ./src/index.ts
 | `/companion reports` | All saved reports, including those already read |
 | `/companion stop` | Stop this session's approved recurring Companion schedules |
 
-Start reads the extension's `src/prompt.md` and injects its contents directly into the agent; no separately installed prompt is needed. It resumes only unchanged, still-approved schedules stopped by Companion; with no saved pause receipts, it does not require schedule control. Stop preserves history, the unread-result footer, and safe schedule-control receipts. A firing delivery finishes without being aborted; Companion then disables its next recurrence. Unfinished stop requests resume in the same session after reloads.
+Start reads the extension's `src/prompt.md` and injects its contents directly into the agent; no separately installed prompt is needed. It resumes only unchanged, still-approved schedules stopped by Companion; with no saved pause receipts, it does not require schedule control. Stop preserves history, the schedule-count footer, and safe schedule-control receipts. A firing delivery finishes without being aborted; Companion then disables its next recurrence. Unfinished stop requests resume in the same session after reloads.
 
 `~/.companion-schedules.md` is the source of truth for recurring tasks, cadence, timezone, checklists, and referenced working instructions. The agent reads it each run and uses relevant `~/.companion-notes/` as the previous-run baseline. A missing baseline means a first run, not a setup blocker; the scheduler does not need to retain collection summaries. Task-specific content stays in the registry rather than the extension.
 
@@ -42,7 +42,7 @@ Supply `id`, `kind` (`update` or `report`), `final: true`, `title`, `body`, and 
 
 Updates also need a `reason`: `action`, `material`, or `blocker`. Routine no-change results, individual feedback ratings, repeated findings, and non-actionable collection failures stay in notes. Feedback reviews group related evidence into a new problem or recommendation worth considering, not a report per rating. An explicitly requested report may confirm no change.
 
-Before publishing, the agent compares prior publications in notes and omits unchanged findings, including findings already published in the other view. A follow-up explains the material change or an approved reminder. Titles name the finding; bodies lead with the outcome and include only necessary context, evidence links, and any next action. The agent decides relevance and semantic duplication; the extension does not enforce either or audit collection. A run without a saved item creates no unread notification, while its results and gaps remain in notes.
+Before publishing, the agent compares prior publications in notes and omits unchanged findings, including findings already published in the other view. A follow-up explains the material change or an approved reminder. Titles name the finding; bodies lead with the outcome and include only necessary context, evidence links, and any next action. The agent decides relevance and semantic duplication; the extension does not enforce either or audit collection. A run without a saved item leaves its results and gaps in notes.
 
 For example, an explicitly requested reading status report can disclose an incomplete check:
 

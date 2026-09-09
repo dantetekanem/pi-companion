@@ -15,7 +15,9 @@ export function registerCompanion(pi: ExtensionAPI, paths: Paths): void {
   const sessionId = (ctx: ExtensionContext) => ctx.sessionManager.getSessionId();
   const storeFor = (ctx: ExtensionContext) => new Store(paths.root, sessionId(ctx));
   const refresh = (ctx: ExtensionContext) => {
-    if (ctx.hasUI) ctx.ui.setStatus('companion', footer(storeFor(ctx).load(), countSchedules(ctx, paths)));
+    if (!ctx.hasUI) return;
+    try { ctx.ui.setStatus('companion', footer(storeFor(ctx).load(), countSchedules(ctx, paths))); }
+    catch { ctx.ui.setStatus('companion', undefined); }
   };
   const isCompanionSchedule = (name: unknown) => {
     if (typeof name !== 'string') return false;
@@ -46,11 +48,11 @@ export function registerCompanion(pi: ExtensionAPI, paths: Paths): void {
       if (storeFor(ctx).load().stopping.length) void runControl('finish-stop', ctx).catch(error => {
         if (generation === token && ctx.hasUI) ctx.ui.notify(`Companion stop remains pending: ${error.message}`, 'error');
       });
-    } catch { if (ctx.hasUI) ctx.ui.setStatus('companion', 'Companion · storage unreadable'); }
+    } catch { if (ctx.hasUI) ctx.ui.setStatus('companion', undefined); }
   });
   pi.on('agent_end', (_event, ctx) => {
     try { refresh(ctx); }
-    catch { if (ctx.hasUI) ctx.ui.setStatus('companion', 'Companion · storage unreadable'); }
+    catch { if (ctx.hasUI) ctx.ui.setStatus('companion', undefined); }
   });
   pi.on('session_shutdown', (_event, ctx) => { generation++; if (ctx.hasUI) ctx.ui.setStatus('companion', undefined); });
   pi.on('tool_call', (event, ctx) => {
@@ -65,9 +67,10 @@ export function registerCompanion(pi: ExtensionAPI, paths: Paths): void {
     parameters: ResultSchema,
     async execute(_id, params, signal, _onUpdate, ctx) {
       signal?.throwIfAborted();
-      const added = storeFor(ctx).ingest(params);
-      refresh(ctx);
-      return { content: [{ type: 'text', text: added ? 'Companion result saved, unread.' : 'Result already saved; read state preserved.' }], details: { id: params.id, saved: true } };
+      try {
+        const added = storeFor(ctx).ingest(params);
+        return { content: [{ type: 'text', text: added ? 'Companion result saved, unread.' : 'Result already saved; read state preserved.' }], details: { id: params.id, saved: true } };
+      } finally { refresh(ctx); }
     },
   });
   pi.registerCommand('companion', {
@@ -81,6 +84,9 @@ export function registerCompanion(pi: ExtensionAPI, paths: Paths): void {
       const active = () => generation === token;
       try {
         if (action === '' || action === 'start') {
+          const store = storeFor(ctx), state = store.load();
+          state.started = true;
+          store.save(state);
           refresh(ctx);
           try {
             if (storeFor(ctx).load().paused.length) await runControl('start', ctx);
@@ -119,6 +125,7 @@ export function registerCompanion(pi: ExtensionAPI, paths: Paths): void {
           }
         } finally { viewing = false; }
       } catch (error) {
+        if (active()) refresh(ctx);
         if (active() && ctx.hasUI) ctx.ui.notify(error instanceof Error ? error.message : 'Companion failed.', 'error');
       }
     },
