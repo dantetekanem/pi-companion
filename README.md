@@ -12,7 +12,7 @@ Requires Pi 0.85.1-compatible APIs. Register your local checkout with `pi instal
 pi -e ./src/index.ts
 ```
 
-Use the session that owns your Companion work. Installation does not create schedules, rewrite prompts, or discover, map, or import existing notes and baselines. Ask the owning agent to use `companion_save` for future results and digests.
+`/companion` claims Companion for its current session. The claim survives reloads, permits only that session to start Companion, and shows its saved-result footer only there. Another session is refused until the owner runs `/companion stop`. Installation does not create schedules, rewrite prompts, or discover, map, or import existing notes and baselines. Ask the owning agent to use `companion_save` for future results and digests.
 
 ## Commands
 
@@ -24,9 +24,9 @@ Use the session that owns your Companion work. Installation does not create sche
 | `/companion reports` | All saved reports, including those already read |
 | `/companion stop` | Stop this session's approved recurring Companion schedules |
 
-Start uses Pi prompt-template expansion to invoke `/companion-prompt`. It resumes only unchanged, still-approved schedules stopped by Companion; with no saved pause receipts, it does not require schedule control. Stopping preserves history and the footer. A firing delivery finishes without being aborted; Companion then disables its next recurrence. Unfinished stop requests survive reloads and resume in their owning session.
+Start uses Pi prompt-template expansion to invoke `/companion-prompt`. It resumes only unchanged, still-approved schedules stopped by Companion; with no saved pause receipts, it does not require schedule control. Stop preserves history and safe schedule-control receipts, then releases ownership and clears the footer once the scheduler confirms the stop. A firing delivery finishes without being aborted; Companion then disables its next recurrence. Unfinished stop requests keep ownership across reloads and resume in their owning session.
 
-Schedule control requires the existing `@jl1990/pi-scheduler` package. A task must belong to the exact current session (`scope: session`), recur, and have a name exactly matching a `##` heading in the local `~/.companion-schedules.md`. Other sessions, cwd/global tasks, one-shot tasks, canceled work, and unrelated names are excluded. Keep canceled work out of that source of truth.
+Schedule control requires the existing `@jl1990/pi-scheduler` package. A task must belong to the exact current session (`scope: session`), recur, and have a name exactly matching a `##` heading in the local `~/.companion-schedules.md`. Other sessions, cwd/global tasks, one-shot tasks, canceled work, and unrelated names are excluded. Keep canceled work out of that source of truth. The extension blocks identifiable Companion `schedule_task` calls when they use another scope or come from a non-owner session. Pi exposes this enforcement at tool calls, so direct scheduler slash commands and tasks without a registry-matching name remain outside the Companion gate.
 
 Companion uses the scheduler's commands and confirms their saved state. It does not create schedules or change recurrence expressions. Start follows the scheduler's next-run calculation, resets interval timing, and does not backfill missed checks. Manually canceled, edited, or subsequently disabled tasks are not resumed. If a command cannot be confirmed, inspect `/schedules all`; confirmed changes and unfinished stop requests remain saved.
 
@@ -60,9 +60,9 @@ IDs are stable per result/run: up to 128 letters, digits, dots, colons, undersco
 
 ## Storage and limits
 
-Results and schedule-control state live outside the package, in `companion/<session-ID hash>.json` under Pi's agent directory. Files use private permissions and atomic replacement. Resuming the same session preserves state; new sessions and forks start empty. Tree navigation does not rewind read state. Existing Companion artifacts stay untouched. The reader wraps plain text and literal Markdown/URLs without opening a browser.
+Results and schedule-control state live outside the package, in `companion/<session-ID hash>.json` under Pi's agent directory. Files use private permissions and atomic replacement. The active owner is an atomically claimed private `companion/owner.json` file. Resuming the same session preserves state; new sessions and forks start empty. Tree navigation does not rewind read state. Existing Companion artifacts stay untouched. The reader wraps plain text and literal Markdown/URLs without opening a browser.
 
-Use one Pi process per owning session. Companion has no cross-session inbox, collector, report generator, or daemon. Pi Scheduler's shared state file has no cross-process locking; that limitation still applies. A crash between disabling a task and saving its pause receipt can leave it disabled without a receipt. Inspect it with the scheduler's commands rather than blindly re-enabling it.
+Companion has no cross-session inbox, collector, report generator, or daemon. Pi Scheduler's shared state file has no cross-process locking; that limitation still applies. A crash between disabling a task and saving its pause receipt can leave it disabled without a receipt. Inspect it with the scheduler's commands rather than blindly re-enabling it.
 
 ## Tests
 
