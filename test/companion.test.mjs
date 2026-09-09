@@ -16,7 +16,6 @@ const aliases = Object.fromEntries(['@earendil-works/pi-coding-agent', '@earendi
   .map(name => [name, fileURLToPath(host.esmResolve(name))]));
 const jiti = createJiti(import.meta.url, { moduleCache: false, alias: aliases });
 const { Store } = await jiti.import('../src/store.ts');
-const { Owner } = await jiti.import('../src/owner.ts');
 const { footer, label, validateResult } = await jiti.import('../src/result.ts');
 const { Reader } = await jiti.import('../src/reader.ts');
 const { controlSchedules } = await jiti.import('../src/scheduler.ts');
@@ -175,39 +174,29 @@ test('start and bare companion invoke the Companion prompt template; autocomplet
   assert.equal(h.selections.length, 0);
 });
 
-test('one owner gates Companion starts, footer visibility, reload, and stop', async t => {
+test('sessions independently start Companion and stop only their own schedules', async t => {
   const scheduler = schedulerFixture(t);
-  const owner = harness(t, 'owner', scheduler), other = harness(t, 'other', scheduler);
-  for (const runtime of [owner, other]) {
+  writeFileSync(join(scheduler.dir, 'owner.json'), JSON.stringify({ version: 1, sessionId: 'retired-session' }));
+  const first = harness(t, 'owner', scheduler), second = harness(t, 'other', scheduler);
+  for (const runtime of [first, second]) {
     runtime.pi.getCommands = scheduler.pi.getCommands;
     runtime.pi.sendUserMessage = (content, options) => {
       if (content === '/companion-prompt') runtime.messages.push({ content, options });
       else scheduler.pi.sendUserMessage(content, options);
     };
+    await runtime.command('start');
+    assert.equal(runtime.messages.length, 1);
+    await runtime.ingest(report());
+    assert.equal(runtime.statuses.at(-1)[1], 'Companion · 1 report');
   }
-  await other.ingest(report('other-history'));
-  await owner.events.get('session_start')({}, owner.ctx);
-  await owner.command('start');
-  await owner.ingest(report('owner-history'));
-  assert.equal(owner.statuses.at(-1)[1], 'Companion · 1 report');
-  await other.events.get('session_start')({}, other.ctx);
-  assert.equal(other.statuses.at(-1)[1], undefined);
-  await other.command('');
-  assert.equal(other.messages.length, 0);
-  assert.match(other.notices.at(-1)[0], /another session/i);
-  await owner.events.get('session_shutdown')({}, owner.ctx);
-  const reloaded = harness(t, 'owner', scheduler);
-  reloaded.pi.getCommands = scheduler.pi.getCommands;
-  reloaded.pi.sendUserMessage = owner.pi.sendUserMessage;
-  await reloaded.events.get('session_start')({}, reloaded.ctx);
-  assert.equal(reloaded.statuses.at(-1)[1], 'Companion · 1 report');
-  await reloaded.command('stop');
-  assert.equal(reloaded.statuses.at(-1)[1], undefined);
-  await other.command('start');
-  assert.equal(other.messages.length, 1);
+  await second.command('stop');
+  assert.deepEqual(scheduler.sent, ['/schedule-disable task_other']);
+  assert.equal(scheduler.tasks[0].enabled, true);
+  await first.command('stop');
+  assert.deepEqual(scheduler.sent, ['/schedule-disable task_other', '/schedule-disable task_owned']);
 });
 
-test('only identifiable Companion schedule creation is owner- and session-scoped', async t => {
+test('identifiable Companion schedule creation is session-scoped in every session', async t => {
   const scheduler = schedulerFixture(t);
   const owner = harness(t, 'owner', scheduler), other = harness(t, 'other', scheduler);
   const gate = owner.events.get('tool_call');
@@ -216,8 +205,7 @@ test('only identifiable Companion schedule creation is owner- and session-scoped
   assert.equal(await gate({ toolName: 'schedule_task', input: { name: 'CI poll', scope: 'global' } }, owner.ctx), undefined);
   await owner.command('start');
   assert.equal(await gate({ toolName: 'schedule_task', input: { name: 'Reading', scope: 'session' } }, owner.ctx), undefined);
-  assert.deepEqual(await gate({ toolName: 'schedule_task', input: { name: 'Reading', scope: 'session' } }, other.ctx),
-    { block: true, reason: 'Another session owns Companion scheduling.' });
+  assert.equal(await gate({ toolName: 'schedule_task', input: { name: 'Reading', scope: 'session' } }, other.ctx), undefined);
 });
 
 test('reader scrolls long results within terminal bounds and distinguishes close from mark-read', () => {
@@ -288,7 +276,6 @@ test('a deferred stop rechecks approval after the running delivery finishes', as
 
 test('a reload resumes deferred stop only in its owning session', async t => {
   const h = schedulerFixture(t); h.tasks[0].status = 'running'; h.save();
-  new Owner(h.dir).acquire('owner');
   let active = true;
   const stopping = controlSchedules('stop', h.pi, h.ctx, h.store, { ...h.options, isActive: () => active });
   active = false;
@@ -304,11 +291,10 @@ test('a reload resumes deferred stop only in its owning session', async t => {
   assert.equal(h.store.load().paused.length, 1); assert.equal(h.store.load().items.length, 0);
 });
 
-test('successful session recovery releases only its owner and clears its footer', async t => {
+test('successful session recovery completes the stop and preserves saved results', async t => {
   const h = schedulerFixture(t); h.tasks[0].status = 'running'; h.save();
   const runtime = harness(t, 'owner', h);
   Object.assign(runtime.pi, { getCommands: h.pi.getCommands, sendUserMessage: h.pi.sendUserMessage });
-  new Owner(h.dir).acquire('owner');
   await runtime.ingest(report('recovery-history'));
   assert.equal(runtime.statuses.at(-1)[1], 'Companion · 1 report');
   const stopping = runtime.command('stop');
@@ -319,20 +305,20 @@ test('successful session recovery releases only its owner and clears its footer'
   h.tasks[0].status = 'pending'; h.save();
   const other = harness(t, 'other', h);
   await other.events.get('session_start')({}, other.ctx);
-  assert.equal(new Owner(h.dir).current(), 'owner');
+  assert.equal(h.store.load().stopping.length, 1);
   await runtime.events.get('session_start')({}, runtime.ctx);
   await new Promise(setImmediate);
-  assert.equal(new Owner(h.dir).current(), undefined);
-  assert.equal(runtime.statuses.at(-1)[1], undefined);
+  assert.equal(h.store.load().stopping.length, 0);
+  assert.equal(h.store.load().paused.length, 1);
+  assert.equal(runtime.statuses.at(-1)[1], 'Companion · 1 report');
   await other.command('start');
   assert.equal(other.messages.length, 1);
 });
 
-test('failed session recovery retains ownership and its footer', async t => {
+test('failed session recovery reports the pending stop and preserves its footer', async t => {
   const h = schedulerFixture(t); h.tasks[0].status = 'running'; h.save();
   const runtime = harness(t, 'owner', h);
   Object.assign(runtime.pi, { getCommands: h.pi.getCommands, sendUserMessage: h.pi.sendUserMessage });
-  new Owner(h.dir).acquire('owner');
   await runtime.ingest(report('failed-recovery'));
   const stopping = runtime.command('stop');
   await runtime.events.get('session_shutdown')({}, runtime.ctx);
@@ -346,34 +332,16 @@ test('failed session recovery retains ownership and its footer', async t => {
   await runtime.events.get('session_start')({}, runtime.ctx);
   const [message] = await notified;
   assert.match(message, /stop remains pending/);
-  assert.equal(new Owner(h.dir).current(), 'owner');
+  assert.equal(h.store.load().stopping.length, 1);
   assert.equal(runtime.statuses.at(-1)[1], 'Companion · 1 report');
-});
-
-test('stale session recovery cannot release its owner after generation changes', async t => {
-  const h = schedulerFixture(t); h.tasks[0].status = 'running'; h.save();
-  const runtime = harness(t, 'owner', h);
-  Object.assign(runtime.pi, { getCommands: h.pi.getCommands, sendUserMessage: h.pi.sendUserMessage });
-  new Owner(h.dir).acquire('owner');
-  const stopping = runtime.command('stop');
-  await runtime.events.get('session_shutdown')({}, runtime.ctx);
-  await stopping;
-  await new Promise(setImmediate);
-  h.tasks[0].status = 'pending'; h.save();
-  await runtime.events.get('session_start')({}, runtime.ctx);
-  await runtime.events.get('session_shutdown')({}, runtime.ctx);
-  await new Promise(setImmediate);
-  assert.equal(h.store.load().paused.length, 1);
-  assert.equal(new Owner(h.dir).current(), 'owner');
 });
 
 test('immediate shutdown/start chains recovery after the interrupted control clears', async t => {
   const h = schedulerFixture(t); h.tasks[0].status = 'running'; h.save();
-  new Owner(h.dir).acquire('owner');
   const runtime = harness(t, 'owner', h);
   Object.assign(runtime.pi, { getCommands: h.pi.getCommands, sendUserMessage: h.pi.sendUserMessage });
   const stopping = runtime.command('stop');
-  assert.equal(new Owner(h.dir).isOwner('owner'), true);
+  assert.equal(h.store.load().stopping.length, 1);
   await runtime.events.get('session_shutdown')({}, runtime.ctx);
   await runtime.events.get('session_start')({}, runtime.ctx);
   h.tasks[0].status = 'pending'; h.save();

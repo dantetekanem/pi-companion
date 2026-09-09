@@ -4,7 +4,6 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { footer, label, ResultSchema } from './result.ts';
 import { Store } from './store.ts';
-import { Owner } from './owner.ts';
 import { Reader } from './reader.ts';
 import { controlSchedules, type SchedulerPaths } from './scheduler.ts';
 
@@ -13,16 +12,10 @@ export function registerCompanion(pi: ExtensionAPI, paths: Paths): void {
   let generation = 0;
   let control: Promise<void> | undefined;
   let viewing = false;
-  const owner = new Owner(paths.root);
   const sessionId = (ctx: ExtensionContext) => ctx.sessionManager.getSessionId();
   const storeFor = (ctx: ExtensionContext) => new Store(paths.root, sessionId(ctx));
-  const owns = (ctx: ExtensionContext) => owner.isOwner(sessionId(ctx));
   const refresh = (ctx: ExtensionContext) => {
-    if (ctx.hasUI) ctx.ui.setStatus('companion', owns(ctx) ? footer(storeFor(ctx).load()) : undefined);
-  };
-  const claim = (ctx: ExtensionContext) => {
-    if (owner.acquire(sessionId(ctx))) { refresh(ctx); return; }
-    throw new Error('Another session owns Companion scheduling. Stop Companion there before starting here.');
+    if (ctx.hasUI) ctx.ui.setStatus('companion', footer(storeFor(ctx).load()));
   };
   const isCompanionSchedule = (name: unknown) => {
     if (typeof name !== 'string') return false;
@@ -47,11 +40,8 @@ export function registerCompanion(pi: ExtensionAPI, paths: Paths): void {
   pi.on('session_start', (_event, ctx) => {
     const token = ++generation;
     try {
-      if (!owns(ctx)) { if (ctx.hasUI) ctx.ui.setStatus('companion', undefined); return; }
       refresh(ctx);
-      if (storeFor(ctx).load().stopping.length) void runControl('finish-stop', ctx).then(() => {
-        if (generation === token && owner.release(sessionId(ctx))) refresh(ctx);
-      }).catch(error => {
+      if (storeFor(ctx).load().stopping.length) void runControl('finish-stop', ctx).catch(error => {
         if (generation === token && ctx.hasUI) ctx.ui.notify(`Companion stop remains pending: ${error.message}`, 'error');
       });
     } catch { if (ctx.hasUI) ctx.ui.setStatus('companion', 'Companion · storage unreadable'); }
@@ -62,7 +52,6 @@ export function registerCompanion(pi: ExtensionAPI, paths: Paths): void {
     const input = event.input as { name?: unknown; scope?: unknown };
     if (!isCompanionSchedule(input.name)) return;
     if (input.scope !== undefined && input.scope !== 'session') return { block: true, reason: 'Companion schedules must use session scope.' };
-    if (!owns(ctx)) return { block: true, reason: 'Another session owns Companion scheduling.' };
   });
   pi.registerTool({
     name: 'companion_save', label: 'Save Companion result',
@@ -86,7 +75,7 @@ export function registerCompanion(pi: ExtensionAPI, paths: Paths): void {
       const active = () => generation === token;
       try {
         if (action === '' || action === 'start') {
-          claim(ctx);
+          refresh(ctx);
           try {
             if (storeFor(ctx).load().paused.length) await runControl('start', ctx);
           } finally {
@@ -95,9 +84,7 @@ export function registerCompanion(pi: ExtensionAPI, paths: Paths): void {
           return;
         }
         if (action === 'stop') {
-          if (!owns(ctx)) throw new Error('Another session owns Companion scheduling.');
           await runControl('stop', ctx);
-          if (!owner.release(sessionId(ctx))) throw new Error('Companion ownership changed before stopping completed.');
           refresh(ctx);
           return;
         }
