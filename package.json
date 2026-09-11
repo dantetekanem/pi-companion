@@ -1,9 +1,9 @@
 {
   "name": "pi-companion",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
-  "description": "Session-scoped Companion results, unread updates and compiled reports for Pi.",
+  "description": "Session-scoped Companion schedules with append-only Markdown updates and reports for Pi.",
   "keywords": ["pi-package"],
   "repository": "https://github.com/dantetekanem/pi-companion",
   "files": ["src", "README.md"],

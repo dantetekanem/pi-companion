@@ -2,16 +2,14 @@ import { getAgentDir, type ExtensionAPI, type ExtensionContext } from '@earendil
 import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { footer, label, ResultSchema } from './result.ts';
+import { footer } from './result.ts';
 import { Store } from './store.ts';
-import { Reader } from './reader.ts';
 import { controlSchedules, countSchedules, type SchedulerPaths } from './scheduler.ts';
 
 type Paths = SchedulerPaths & { root: string };
 export function registerCompanion(pi: ExtensionAPI, paths: Paths): void {
   let generation = 0;
   let control: Promise<void> | undefined;
-  let viewing = false;
   const sessionId = (ctx: ExtensionContext) => ctx.sessionManager.getSessionId();
   const storeFor = (ctx: ExtensionContext) => new Store(paths.root, sessionId(ctx));
   const refresh = (ctx: ExtensionContext) => {
@@ -61,22 +59,10 @@ export function registerCompanion(pi: ExtensionAPI, paths: Paths): void {
     if (!isCompanionSchedule(input.name)) return;
     if (input.scope !== undefined && input.scope !== 'session') return { block: true, reason: 'Companion schedules must use session scope.' };
   });
-  pi.registerTool({
-    name: 'companion_save', label: 'Save Companion result',
-    description: 'Publish only information the user needs to read: a new action, decision, material change or actionable blocker, a useful new synthesis, or an explicitly requested report. Routine no-change, individual feedback ratings and repeated findings stay in notes, not reports. Compare prior publications; do not duplicate a finding across runs or updates/reports. Use a stable ID per finding/synthesis version and reuse it on retries. Lead with the finding, keep it concise, and include every expected check in scope, including failures and gaps. Scheduler delivery is not collection. Max body 32000 chars, 40 checks. Does not collect, schedule or mark read.',
-    parameters: ResultSchema,
-    async execute(_id, params, signal, _onUpdate, ctx) {
-      signal?.throwIfAborted();
-      try {
-        const added = storeFor(ctx).ingest(params);
-        return { content: [{ type: 'text', text: added ? 'Companion result saved, unread.' : 'Result already saved; read state preserved.' }], details: { id: params.id, saved: true } };
-      } finally { refresh(ctx); }
-    },
-  });
   pi.registerCommand('companion', {
-    description: 'Start Companion, or updates | reports | stop (session-owned schedules).',
+    description: 'Start or stop Companion (session-owned schedules).',
     getArgumentCompletions: prefix => {
-      const items = ['updates', 'reports', 'start', 'stop'].filter(value => value.startsWith(prefix)).map(value => ({ value, label: value }));
+      const items = ['start', 'stop'].filter(value => value.startsWith(prefix)).map(value => ({ value, label: value }));
       return items.length ? items : null;
     },
     handler: async (args, ctx) => {
@@ -100,30 +86,7 @@ export function registerCompanion(pi: ExtensionAPI, paths: Paths): void {
           refresh(ctx);
           return;
         }
-        if (!['updates', 'reports'].includes(action)) throw new Error('Usage: /companion [updates|reports|start|stop]');
-        if (ctx.mode !== 'tui') throw new Error('Companion views require Pi interactive mode.');
-        if (viewing) throw new Error('A Companion view is already open.');
-        viewing = true;
-        try {
-          while (active()) {
-            const store = storeFor(ctx);
-            const items = store.load().items.filter(item => (item.kind === 'report' || !item.readAt)
-              && (action === '' || item.kind === (action === 'reports' ? 'report' : 'update'))).reverse();
-            if (!items.length) { ctx.ui.notify('No saved results in this view.', 'info'); return; }
-            const choices = items.map((item, i) => `${i + 1}. ${item.readAt ? '[read]' : '[unread]'} ${label(item)} · ${item.savedAt}`);
-            const choice = await ctx.ui.select('Companion — opening does not mark read', choices);
-            if (!active() || !choice) return;
-            const item = items[choices.indexOf(choice)];
-            if (!item) return;
-            const read = await ctx.ui.custom<boolean>((tui, theme, _keys, done) => {
-              const reader = new Reader(item, theme, () => Math.max(4, tui.terminal.rows - 6), done);
-              return { render: width => reader.render(width), invalidate: () => reader.invalidate(),
-                handleInput: data => { reader.handleInput(data); tui.requestRender(); } };
-            });
-            if (!active()) return;
-            if (read === true) { store.markRead(item.id); refresh(ctx); }
-          }
-        } finally { viewing = false; }
+        throw new Error('Usage: /companion [start|stop]');
       } catch (error) {
         if (active()) refresh(ctx);
         if (active() && ctx.hasUI) ctx.ui.notify(error instanceof Error ? error.message : 'Companion failed.', 'error');

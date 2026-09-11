@@ -17,11 +17,9 @@ const aliases = Object.fromEntries(['@earendil-works/pi-coding-agent', '@earendi
 const jiti = createJiti(import.meta.url, { moduleCache: false, alias: aliases });
 const { Store } = await jiti.import('../src/store.ts');
 const { label, validateResult } = await jiti.import('../src/result.ts');
-const { Reader } = await jiti.import('../src/reader.ts');
 const { controlSchedules } = await jiti.import('../src/scheduler.ts');
 const { registerCompanion } = await jiti.import('../src/index.ts');
 const companionInstructions = readFileSync(new URL('../src/prompt.md', import.meta.url), 'utf8');
-const { visibleWidth } = await jiti.import(aliases['@earendil-works/pi-tui']);
 const report = (id = 'digest-1', outcome = 'no_change') => ({
   id, kind: 'report', final: true, title: 'Reading', body: 'Useful result with evidence.',
   checks: [{ source: 'Paper source', outcome, detail: 'Checked the current listing.' }],
@@ -38,11 +36,7 @@ test('installed Pi loader discovers the real extension without starting a sessio
   const { loadExtensions } = await import(join(root, 'dist/core/extensions/loader.js'));
   const loaded = await loadExtensions([fileURLToPath(new URL('../src/index.ts', import.meta.url))], dir);
   assert.deepEqual(loaded.errors, []);
-  const tool = loaded.extensions[0].tools.get('companion_save');
-  assert.ok(tool);
   assert.ok(loaded.extensions[0].commands.has('companion'));
-  const schema = JSON.stringify(tool.definition.parameters);
-  for (const lookaround of ['(?=', '(?!', '(?<=', '(?<!']) assert.equal(schema.includes(lookaround), false);
 });
 
 test('save survives a new store instance; opening is not reading; explicit read persists', t => {
@@ -124,7 +118,7 @@ function harness(t, sessionId = 'owner', paths) {
   registerCompanion(pi, options);
   return { ...fixturePaths, pi, ctx, options, events, tools, commands, statuses, notices, selections, messages,
     command: args => commands.get('companion').handler(args, ctx),
-    ingest: params => tools.get('companion_save').execute('call', params, undefined, undefined, ctx) };
+    ingest: params => new Store(fixturePaths.dir, sessionId).ingest(params) };
 }
 
 test('started session footer survives reload without manufacturing results', async t => {
@@ -146,37 +140,21 @@ test('started session footer survives reload without manufacturing results', asy
   assert.equal(other.statuses.at(-1)[1], undefined);
 });
 
-test('storage failures clear an already displayed footer for commands and saves', async t => {
-  for (const action of ['start', '', 'save']) {
+test('storage failures clear an already displayed footer for commands', async t => {
+  for (const action of ['start', '']) {
     const h = harness(t);
     await h.command('start');
     assert.equal(h.statuses.at(-1)[1], 'Companion');
     writeFileSync(new Store(h.dir, 'owner').file, '{broken');
-    if (action === 'save') await assert.rejects(h.ingest(report()));
-    else await h.command(action);
+    await h.command(action);
     assert.equal(h.statuses.at(-1)[1], undefined);
   }
 });
 
-test('direct views filter updates/reports; only an explicit reader action marks read', async t => {
-  const h = harness(t); await h.ingest(report()); await h.ingest(update());
-  await h.command('updates'); assert.equal(h.selections.at(-1).choices.length, 1);
-  await h.command('reports'); assert.equal(h.selections.at(-1).choices.length, 1);
-  let selected = false;
-  h.ctx.ui.select = async (_title, choices) => { if (selected) return; selected = true; return choices[0]; };
-  await h.command('updates');
-  assert.equal(new Store(h.dir, 'owner').load().items.find(i => i.kind === 'update').readAt, undefined);
-  selected = false; h.ctx.ui.custom = async () => true;
-  await h.command('updates');
-  assert.ok(new Store(h.dir, 'owner').load().items.find(i => i.kind === 'update').readAt);
-  await h.command('reports');
-  assert.equal(new Store(h.dir, 'owner').load().items.find(i => i.kind === 'report').readAt, undefined);
-});
-
 test('start and bare companion send bundled instructions directly; autocomplete follows Pi\'s null contract', async t => {
   const h = harness(t), command = h.commands.get('companion');
-  assert.deepEqual(command.getArgumentCompletions('')?.map(item => item.value), ['updates', 'reports', 'start', 'stop']);
-  assert.deepEqual(command.getArgumentCompletions('rep')?.map(item => item.value), ['reports']);
+  assert.deepEqual(command.getArgumentCompletions('')?.map(item => item.value), ['start', 'stop']);
+  assert.deepEqual(command.getArgumentCompletions('sta')?.map(item => item.value), ['start']);
   assert.equal(command.getArgumentCompletions('missing'), null);
   await h.command('start'); await h.command('');
   assert.deepEqual(h.messages, [
@@ -244,18 +222,6 @@ test('identifiable Companion schedule creation is session-scoped in every sessio
   await owner.command('start');
   assert.equal(await gate({ toolName: 'schedule_task', input: { name: 'Reading', scope: 'session' } }, owner.ctx), undefined);
   assert.equal(await gate({ toolName: 'schedule_task', input: { name: 'Reading', scope: 'session' } }, other.ctx), undefined);
-});
-
-test('reader scrolls long results within terminal bounds and distinguishes close from mark-read', () => {
-  const done = [], theme = { fg: (_c, text) => text, bold: text => text };
-  const reader = new Reader({ ...report(), body: Array.from({ length: 60 }, (_, i) => `Line ${i} wide 界`).join('\n') }, theme, () => 12, value => done.push(value));
-  const first = reader.render(24);
-  assert.ok(first.length <= 12); assert.ok(first.every(line => visibleWidth(line) <= 24));
-  reader.handleInput('\u001b[B'); assert.notDeepEqual(reader.render(24), first);
-  reader.handleInput('\u001b'); assert.deepEqual(done, [false]);
-  const second = new Reader(report(), theme, () => 12, value => done.push(value));
-  second.handleInput('r'); assert.deepEqual(done, [false, true]);
-  for (const width of [1, 8, 40]) assert.ok(second.render(width).every(line => visibleWidth(line) <= width));
 });
 
 function schedulerFixture(t) {
@@ -430,23 +396,6 @@ test('start never resurrects cancelled, edited, manually re-disabled or no-longe
     await controlSchedules('start', h.pi, h.ctx, h.store, h.options);
     assert.equal(h.sent.length, count);
   }
-});
-
-test('switching session while a view is open cannot consume the old result', async t => {
-  const h = harness(t); await h.ingest(update());
-  h.ctx.ui.select = async (_title, choices) => choices[0];
-  h.ctx.ui.custom = async () => { await h.events.get('session_shutdown')({}, h.ctx); return true; };
-  await h.command('updates');
-  assert.equal(new Store(h.dir, 'owner').load().items[0].readAt, undefined);
-});
-
-test('aborted ingestion and write failure cannot advertise a saved result', async t => {
-  const h = harness(t);
-  const controller = new AbortController(); controller.abort();
-  await assert.rejects(h.tools.get('companion_save').execute('call', report(), controller.signal, undefined, h.ctx));
-  assert.equal(h.statuses.length, 0);
-  writeFileSync(new Store(h.dir, 'owner').file, '{broken');
-  await assert.rejects(h.ingest(report()));
 });
 
 test('unconfirmed scheduler dispatch times out rather than recording a successful stop', async t => {
