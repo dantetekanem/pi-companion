@@ -5,15 +5,16 @@ import { join } from 'node:path';
 import { footer } from './result.ts';
 import { Store } from './store.ts';
 import { controlSchedules, countSchedules, type SchedulerPaths } from './scheduler.ts';
+import { companionTailNotice, saveCompanionLocation } from './tail.ts';
 
 const instructions = (name: 'prompt.md' | 'review-prompt.md') => [
   readFileSync(new URL(`./${name}`, import.meta.url), 'utf8'),
   readFileSync(new URL('../taste.md', import.meta.url), 'utf8'),
 ].join('\n\n');
 
-type Paths = SchedulerPaths & { root: string };
+type Paths = SchedulerPaths & { root: string; locationRoot?: string };
 export function registerCompanion(pi: ExtensionAPI, paths: Paths): void {
-  let generation = 0;
+  let generation = 0, tailPending = true;
   let control: Promise<void> | undefined;
   const sessionId = (ctx: ExtensionContext) => ctx.sessionManager.getSessionId();
   const storeFor = (ctx: ExtensionContext) => new Store(paths.root, sessionId(ctx));
@@ -44,8 +45,15 @@ export function registerCompanion(pi: ExtensionAPI, paths: Paths): void {
     control = tracked;
     await tracked;
   };
+  pi.on('before_agent_start', () => {
+    if (!tailPending) return;
+    tailPending = false;
+    const content = companionTailNotice(paths);
+    if (content) return { message: { customType: 'companion-tail', content, display: false } };
+  });
   pi.on('session_start', (_event, ctx) => {
     const token = ++generation;
+    tailPending = true;
     try {
       refresh(ctx);
       if (storeFor(ctx).load().stopping.length) void runControl('finish-stop', ctx).catch(error => {
@@ -86,6 +94,7 @@ export function registerCompanion(pi: ExtensionAPI, paths: Paths): void {
           try {
             if (storeFor(ctx).load().paused.length) await runControl('start', ctx);
           } finally {
+            if (active()) await saveCompanionLocation(pi, paths, active);
             if (active()) pi.sendUserMessage(instructions('prompt.md'), { deliverAs: 'followUp' });
           }
           return;

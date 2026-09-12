@@ -47,6 +47,14 @@ Schedule control requires the existing `@jl1990/pi-scheduler` package. A task mu
 
 Companion uses the scheduler's commands and confirms their saved state. The extension does not create schedules or change recurrence expressions; the agent reconciles tasks from the registry. Startup instructions also tell the agent to update existing current-session Companion task prompts with the append-only destination. Start follows the scheduler's next-run calculation, resets interval timing, and does not backfill missed checks. Manually canceled, edited, or subsequently disabled tasks are not resumed. If a command cannot be confirmed, inspect `/schedules all`.
 
+## Location for new Herdr sessions
+
+In Herdr, `/companion start` saves its current pane and workspace to `pi-companion-<user-ID>-<workspace>.json` in the OS temporary directory. The latest start in that workspace replaces the location file atomically, with private permissions. This works without schedules.
+
+Before a new or reloaded Pi session's first agent run, the extension reads that file and automatically injects the location plus `tail.md`. The agent can answer where Companion is directly, without loading a skill, calling Herdr, or searching schedules. The notice points to reports and notes on demand and requires approval before opening a live-tail pane. Injection adds no extra turn, content/history reads, panes, or polling.
+
+Run `/companion start` once in Companion after loading this version to populate the file. Already-open receiving sessions need `/reload`; new sessions load it automatically. Missing or invalid files, the same pane, and non-Herdr sessions produce no notice. The saved location survives stopping schedules and session exits until another start or OS temporary-file cleanup; it is a last-known location, not a liveness check. Run start again if Companion moves.
+
 ## Continuity on returning starts
 
 When schedules or prior notes exist, startup instructions tell the agent to load durable onboarding context and taste, then build a compact in-context map of note paths and topics. Daily details and full histories stay in their files until a conversation or task needs them. Existing notes prevent repeated onboarding; knowing where evidence lives does not count as reading it or completing a fresh check. This is agent-directed retrieval, not a new index file or automatic import.

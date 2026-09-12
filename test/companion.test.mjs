@@ -108,13 +108,14 @@ test('a failed durable write does not produce a saved result', t => {
 
 function harness(t, sessionId = 'owner', paths) {
   const fixturePaths = paths ?? fixture(t);
-  const options = { root: fixturePaths.dir, schedulerFile: join(fixturePaths.dir, 'tasks.json'), schedulesFile: join(fixturePaths.dir, 'schedules.md') };
+  const options = { root: fixturePaths.dir, locationRoot: fixturePaths.dir, schedulerFile: join(fixturePaths.dir, 'tasks.json'), schedulesFile: join(fixturePaths.dir, 'schedules.md') };
   const events = new Map(), tools = new Map(), commands = new Map(), statuses = [], notices = [], selections = [];
   const ctx = { mode: 'tui', hasUI: true, sessionManager: { getSessionId: () => sessionId, getSessionFile: () => `${sessionId}.jsonl` },
     ui: { setStatus: (key, value) => statuses.push([key, value]), notify: (...args) => notices.push(args),
       select: async (title, choices) => { selections.push({ title, choices }); return undefined; }, custom: async () => false } };
   const messages = [], pi = { on: (name, fn) => events.set(name, fn), registerTool: tool => tools.set(tool.name, tool),
     registerCommand: (name, command) => commands.set(name, command), getCommands: () => [],
+    exec: async () => ({ code: 1, stdout: '', stderr: 'Herdr unavailable', killed: false }),
     sendUserMessage: (content, options) => messages.push({ content, options }) };
   registerCompanion(pi, options);
   return { ...fixturePaths, pi, ctx, options, events, tools, commands, statuses, notices, selections, messages,
@@ -175,6 +176,75 @@ test('review injects review and taste instructions without starting Companion or
     options: { deliverAs: 'followUp' },
   }]);
   assert.deepEqual(store.load(), before);
+});
+
+function locationHarness(t, h = harness(t)) {
+  for (const [key, value] of Object.entries({ HERDR_ENV: '1', HERDR_WORKSPACE_ID: 'w1', HERDR_PANE_ID: 'w1:p2' })) {
+    const previous = process.env[key]; process.env[key] = value;
+    t.after(() => { if (previous === undefined) delete process.env[key]; else process.env[key] = previous; });
+  }
+  const pane = { pane_id: 'w1:p1', workspace_id: 'w1' }, calls = [];
+  h.pi.exec = async (command, args, options) => {
+    calls.push(args); assert.equal(command, 'herdr'); assert.equal(options.timeout, 1000);
+    assert.deepEqual(args, ['pane', 'current', '--current']);
+    return { code: 0, stdout: JSON.stringify({ result: { pane } }), killed: false };
+  };
+  const file = join(h.dir, `pi-companion-${process.getuid?.() ?? 'user'}-w1.json`);
+  return { ...h, pane, calls, file };
+}
+
+test('Companion location saved by start is automatically injected once in a new agent without discovery', async t => {
+  const h = locationHarness(t); await h.command('start');
+  assert.deepEqual(JSON.parse(readFileSync(h.file, 'utf8')), { workspace: 'w1', pane: 'w1:p1' });
+  assert.equal(statSync(h.file).mode & 0o777, 0o600);
+  assert.equal(h.messages[0].content, companionInstructions);
+  const reader = harness(t, 'reader', h), calls = [];
+  reader.pi.exec = async (...args) => { calls.push(args); throw Error('No discovery allowed'); };
+  const notice = () => reader.events.get('before_agent_start')({}, reader.ctx);
+  assert.deepEqual(await notice(), { message: { customType: 'companion-tail', display: false,
+    content: `${readFileSync(new URL('../tail.md', import.meta.url), 'utf8')}\nCompanion location: pane w1:p1 (workspace w1)` } });
+  assert.equal(await notice(), undefined);
+  await reader.events.get('session_start')({}, reader.ctx);
+  assert.ok((await notice())?.message);
+  assert.equal(calls.length, 0); assert.equal(reader.messages.length, 0);
+  h.pane.pane_id = 'w1:p3'; await h.command('start');
+  await reader.events.get('session_start')({}, reader.ctx);
+  assert.ok((await notice())?.message.content.endsWith('pane w1:p3 (workspace w1)'));
+});
+
+test('Companion location excludes self, other workspaces, missing and malformed records', async t => {
+  const h = locationHarness(t); await h.command('start');
+  const saved = readFileSync(h.file, 'utf8');
+  for (const data of ['{broken', '{}', JSON.stringify({ workspace: 'w2', pane: 'w2:p1' }),
+    JSON.stringify({ workspace: 'w1', pane: 'w1:p2' }),
+    JSON.stringify({ workspace: 'w1', pane: '' })]) {
+    writeFileSync(h.file, data);
+    const reader = harness(t, 'reader', h);
+    assert.equal(await reader.events.get('before_agent_start')({}, reader.ctx), undefined);
+  }
+  writeFileSync(h.file, saved); process.env.HERDR_ENV = '0';
+  const outside = harness(t, 'reader', h);
+  assert.equal(await outside.events.get('before_agent_start')({}, outside.ctx), undefined);
+  process.env.HERDR_ENV = '1'; rmSync(h.file);
+  const missing = harness(t, 'reader', h);
+  assert.equal(await missing.events.get('before_agent_start')({}, missing.ctx), undefined);
+});
+
+test('Companion location failures do not block start and stale start cannot register', async t => {
+  const h = locationHarness(t);
+  for (const result of [{ code: 1, stdout: '{}' }, { code: 0, stdout: '{broken' },
+    { code: 0, stdout: '{"result":{"pane":{"pane_id":"","workspace_id":"w1"}}}' }]) {
+    h.pi.exec = async () => result; await h.command('start');
+    assert.throws(() => statSync(h.file), { code: 'ENOENT' });
+  }
+  assert.equal(h.messages.length, 3);
+  let release;
+  h.pi.exec = () => new Promise(resolve => { release = resolve; });
+  const starting = h.command('start');
+  await h.events.get('session_shutdown')({}, h.ctx);
+  release({ code: 0, stdout: JSON.stringify({ result: { pane: h.pane } }) });
+  await starting;
+  assert.throws(() => statSync(h.file), { code: 'ENOENT' });
 });
 
 test('footer counts current-session active schedules and refreshes after agent work', async t => {
