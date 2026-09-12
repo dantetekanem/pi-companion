@@ -37,15 +37,33 @@ The first proposed schedule is a weekly morning Companion review: the same instr
 | `/companion stop` | Stop this session's approved recurring Companion schedules |
 | `/companion review` | Review current schedules and Companion's usefulness; propose improvements if warranted |
 
-Review only sends the bundled `src/review-prompt.md` instructions to the agent. It does not start Companion or control schedules. The prompt directs useful findings to the same append-only reports file, leaves existing Herdr tail panes alone, and requires approval before applying any proposal. No worthwhile change is a valid result.
+Review sends the bundled `src/review-prompt.md` and `taste.md` instructions to the agent. It does not start Companion or control schedules. The prompt directs useful findings to the same append-only reports file, leaves existing Herdr tail panes alone, and requires approval before applying any operational proposal. Supported descriptive taste updates are saved under the taste instructions. No worthwhile change is a valid result.
 
-Start reads `src/prompt.md` and sends its contents directly to the agent. It resumes only unchanged, still-approved schedules stopped by Companion; with no saved pause receipts, it does not require schedule control. Stop preserves history, the schedule-count footer, and schedule-control receipts. A firing delivery finishes without being aborted; Companion then disables its next recurrence. Unfinished stop requests resume in the same session after reloads.
+Every start reads `src/prompt.md` and the package's root `taste.md` and sends both directly to the agent, including returning starts. It resumes only unchanged, still-approved schedules stopped by Companion; with no saved pause receipts, it does not require schedule control. Stop preserves history, the schedule-count footer, and schedule-control receipts. A firing delivery finishes without being aborted; Companion then disables its next recurrence. Unfinished stop requests resume in the same session after reloads.
 
 `~/.companion-schedules.md` is the source of truth for recurring tasks, cadence, timezone, checklists, and referenced working instructions. The agent reads it each run and uses relevant `~/.companion-notes/` as the previous-run baseline. A missing baseline means a first run, not a setup blocker. Task-specific content stays in the registry rather than the extension.
 
 Schedule control requires the existing `@jl1990/pi-scheduler` package. A task must belong to the exact current session (`scope: session`), recur, and have a name exactly matching a `##` heading in `~/.companion-schedules.md`. Other sessions, cwd/global tasks, one-shot tasks, canceled work, and unrelated names are excluded. The extension blocks identifiable Companion `schedule_task` calls when they use another scope. Direct scheduler slash commands and tasks without a registry-matching name remain outside that gate.
 
 Companion uses the scheduler's commands and confirms their saved state. The extension does not create schedules or change recurrence expressions; the agent reconciles tasks from the registry. Startup instructions also tell the agent to update existing current-session Companion task prompts with the append-only destination. Start follows the scheduler's next-run calculation, resets interval timing, and does not backfill missed checks. Manually canceled, edited, or subsequently disabled tasks are not resumed. If a command cannot be confirmed, inspect `/schedules all`.
+
+## Continuity on returning starts
+
+When schedules or prior notes exist, startup instructions tell the agent to load durable onboarding context and taste, then build a compact in-context map of note paths and topics. Daily details and full histories stay in their files until a conversation or task needs them. Existing notes prevent repeated onboarding; knowing where evidence lives does not count as reading it or completing a fresh check. This is agent-directed retrieval, not a new index file or automatic import.
+
+## Taste memory
+
+The agent maintains learned interests, likes, dislikes, and preferences in `~/.companion-notes/taste.md`. The package's `taste.md` is the maintenance prompt, not the personal profile. It applies throughout onboarding, ordinary conversation, requests, corrections, feedback, reviews, and scheduled work. Start loads instructions; supported new evidence triggers updates. Relevant preferences inform responses, and current requests take precedence.
+
+Startup instructions direct the agent to include the installed taste prompt's absolute path in current-session Companion task prompts so independent runs read it too. Review injects it directly. No separate taste schedule or history scan is created. Routine maintenance stays out of reports. Profile reads, evidence assessment, and saves are agent responsibilities, not an automatic extractor or file watcher.
+
+### Research basis
+
+These sources inform the taste design; they do not validate this exact prompt.
+
+- [PRELUDE/CIPHER: Aligning LLM Agents by Learning Latent Preference from User Edits](https://www.microsoft.com/en-us/research/publication/aligning-llm-agents-by-learning-latent-preference-from-user-edits/) investigates readable, context-dependent preferences inferred from edits. Its evaluation uses simulated users for writing tasks, not unrestricted real-world taste learning.
+- [LongMemEval](https://xiaowu0162.github.io/long-mem-eval/) evaluates knowledge updates, temporal reasoning, and abstention, among other memory abilities. Its findings also warn that compressing conversations into isolated facts can lose useful context.
+- [LangGraph memory overview](https://docs.langchain.com/oss/python/langgraph/memory) describes profiles and collections of memories, including update errors, information loss, and retrieval trade-offs.
 
 ## Append important findings
 

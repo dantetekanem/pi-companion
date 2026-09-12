@@ -2,6 +2,7 @@
 !/.gitignore
 !/package.json
 !/README.md
+!/taste.md
 !/src/
 !/test/
 /src/*

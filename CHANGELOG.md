@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.1.3 - 2026-09-11
+
+- Inject taste-maintenance instructions with every Companion start and review; maintain learned preferences in `~/.companion-notes/taste.md` throughout conversations and approved scheduled work.
+- Restore durable context and a lightweight map of notes on returning starts, retrieving daily details only when needed.
+- Shorten the prompts while preserving source permissions, evidence rules, and report safeguards; keep research references in the README.
+
 ## 0.1.2 - 2026-09-11
 
 - Guide first-start onboarding through routines, goals, habits, approved sources, and optional voice, scheduler, and subagent setup.

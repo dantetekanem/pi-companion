@@ -19,7 +19,8 @@ const { Store } = await jiti.import('../src/store.ts');
 const { label, validateResult } = await jiti.import('../src/result.ts');
 const { controlSchedules } = await jiti.import('../src/scheduler.ts');
 const { registerCompanion } = await jiti.import('../src/index.ts');
-const companionInstructions = readFileSync(new URL('../src/prompt.md', import.meta.url), 'utf8');
+const tasteInstructions = readFileSync(new URL('../taste.md', import.meta.url), 'utf8');
+const companionInstructions = [readFileSync(new URL('../src/prompt.md', import.meta.url), 'utf8'), tasteInstructions].join('\n\n');
 const report = (id = 'digest-1', outcome = 'no_change') => ({
   id, kind: 'report', final: true, title: 'Reading', body: 'Useful result with evidence.',
   checks: [{ source: 'Paper source', outcome, detail: 'Checked the current listing.' }],
@@ -151,7 +152,7 @@ test('storage failures clear an already displayed footer for commands', async t 
   }
 });
 
-test('start and bare companion send bundled instructions directly; autocomplete follows Pi\'s null contract', async t => {
+test('every start and bare companion send main and taste instructions; autocomplete follows Pi\'s null contract', async t => {
   const h = harness(t), command = h.commands.get('companion');
   assert.deepEqual(command.getArgumentCompletions('')?.map(item => item.value), ['start', 'stop', 'review']);
   assert.deepEqual(command.getArgumentCompletions('sta')?.map(item => item.value), ['start']);
@@ -165,12 +166,12 @@ test('start and bare companion send bundled instructions directly; autocomplete 
   assert.equal(h.selections.length, 0);
 });
 
-test('review injects bundled instructions without starting Companion or requiring scheduler setup', async t => {
+test('review injects review and taste instructions without starting Companion or requiring scheduler setup', async t => {
   const h = harness(t), store = new Store(h.dir, 'owner'), before = store.load();
   await h.command('review');
   assert.equal(h.messages.length, 1);
   assert.deepEqual(h.messages, [{
-    content: readFileSync(new URL('../src/review-prompt.md', import.meta.url), 'utf8'),
+    content: [readFileSync(new URL('../src/review-prompt.md', import.meta.url), 'utf8'), tasteInstructions].join('\n\n'),
     options: { deliverAs: 'followUp' },
   }]);
   assert.deepEqual(store.load(), before);

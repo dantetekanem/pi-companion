@@ -6,6 +6,11 @@ import { footer } from './result.ts';
 import { Store } from './store.ts';
 import { controlSchedules, countSchedules, type SchedulerPaths } from './scheduler.ts';
 
+const instructions = (name: 'prompt.md' | 'review-prompt.md') => [
+  readFileSync(new URL(`./${name}`, import.meta.url), 'utf8'),
+  readFileSync(new URL('../taste.md', import.meta.url), 'utf8'),
+].join('\n\n');
+
 type Paths = SchedulerPaths & { root: string };
 export function registerCompanion(pi: ExtensionAPI, paths: Paths): void {
   let generation = 0;
@@ -70,7 +75,7 @@ export function registerCompanion(pi: ExtensionAPI, paths: Paths): void {
       const active = () => generation === token;
       try {
         if (action === 'review') {
-          pi.sendUserMessage(readFileSync(new URL('./review-prompt.md', import.meta.url), 'utf8'), { deliverAs: 'followUp' });
+          pi.sendUserMessage(instructions('review-prompt.md'), { deliverAs: 'followUp' });
           return;
         }
         if (action === '' || action === 'start') {
@@ -81,7 +86,7 @@ export function registerCompanion(pi: ExtensionAPI, paths: Paths): void {
           try {
             if (storeFor(ctx).load().paused.length) await runControl('start', ctx);
           } finally {
-            if (active()) pi.sendUserMessage(readFileSync(new URL('./prompt.md', import.meta.url), 'utf8'), { deliverAs: 'followUp' });
+            if (active()) pi.sendUserMessage(instructions('prompt.md'), { deliverAs: 'followUp' });
           }
           return;
         }
