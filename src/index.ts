@@ -8,8 +8,8 @@ import { controlSchedules, countSchedules, type SchedulerPaths } from './schedul
 import { companionTailNotice, saveCompanionLocation } from './tail.ts';
 
 const instructions = (name: 'prompt.md' | 'review-prompt.md') => [
-  readFileSync(new URL(`./${name}`, import.meta.url), 'utf8'),
-  readFileSync(new URL('../taste.md', import.meta.url), 'utf8'),
+  readFileSync(new URL(`./prompts/${name}`, import.meta.url), 'utf8'),
+  readFileSync(new URL('./prompts/taste.md', import.meta.url), 'utf8'),
 ].join('\n\n');
 
 type Paths = SchedulerPaths & { root: string; locationRoot?: string };

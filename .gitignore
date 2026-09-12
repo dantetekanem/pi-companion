@@ -2,13 +2,12 @@
 !/.gitignore
 !/package.json
 !/README.md
-!/taste.md
-!/tail.md
 !/src/
 !/test/
 /src/*
 !/src/*.ts
-!/src/prompt.md
-!/src/review-prompt.md
+!/src/prompts/
+/src/prompts/*
+!/src/prompts/*.md
 /test/*
 !/test/*.mjs

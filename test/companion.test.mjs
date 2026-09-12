@@ -19,8 +19,8 @@ const { Store } = await jiti.import('../src/store.ts');
 const { label, validateResult } = await jiti.import('../src/result.ts');
 const { controlSchedules } = await jiti.import('../src/scheduler.ts');
 const { registerCompanion } = await jiti.import('../src/index.ts');
-const tasteInstructions = readFileSync(new URL('../taste.md', import.meta.url), 'utf8');
-const companionInstructions = [readFileSync(new URL('../src/prompt.md', import.meta.url), 'utf8'), tasteInstructions].join('\n\n');
+const tasteInstructions = readFileSync(new URL('../src/prompts/taste.md', import.meta.url), 'utf8');
+const companionInstructions = [readFileSync(new URL('../src/prompts/prompt.md', import.meta.url), 'utf8'), tasteInstructions].join('\n\n');
 const report = (id = 'digest-1', outcome = 'no_change') => ({
   id, kind: 'report', final: true, title: 'Reading', body: 'Useful result with evidence.',
   checks: [{ source: 'Paper source', outcome, detail: 'Checked the current listing.' }],
@@ -172,7 +172,7 @@ test('review injects review and taste instructions without starting Companion or
   await h.command('review');
   assert.equal(h.messages.length, 1);
   assert.deepEqual(h.messages, [{
-    content: [readFileSync(new URL('../src/review-prompt.md', import.meta.url), 'utf8'), tasteInstructions].join('\n\n'),
+    content: [readFileSync(new URL('../src/prompts/review-prompt.md', import.meta.url), 'utf8'), tasteInstructions].join('\n\n'),
     options: { deliverAs: 'followUp' },
   }]);
   assert.deepEqual(store.load(), before);
@@ -202,7 +202,7 @@ test('Companion location saved by start is automatically injected once in a new 
   reader.pi.exec = async (...args) => { calls.push(args); throw Error('No discovery allowed'); };
   const notice = () => reader.events.get('before_agent_start')({}, reader.ctx);
   assert.deepEqual(await notice(), { message: { customType: 'companion-tail', display: false,
-    content: `${readFileSync(new URL('../tail.md', import.meta.url), 'utf8')}\nCompanion location: pane w1:p1 (workspace w1)` } });
+    content: `${readFileSync(new URL('../src/prompts/tail.md', import.meta.url), 'utf8')}\nCompanion location: pane w1:p1 (workspace w1)` } });
   assert.equal(await notice(), undefined);
   await reader.events.get('session_start')({}, reader.ctx);
   assert.ok((await notice())?.message);

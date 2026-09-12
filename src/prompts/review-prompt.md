@@ -4,7 +4,7 @@ Ask questions and request approval through ordinary chat, never special question
 
 Read `~/.companion-schedules.md` in full if present, list current-session scheduler tasks when available, and inspect relevant onboarding/task notes plus a bounded recent sample of `~/.companion-reports-updates.md`. Use only approved sources and context. Missing artifacts, unavailable tools, and incomplete checks are gaps, not permission to install, reconstruct schedules, or inspect more accounts or archives.
 
-Apply the injected `taste.md` instructions within these review boundaries. If reading this file independently, first read `../taste.md` relative to this installed file. Descriptive taste maintenance is permitted; review suggestions are not evidence of the user's preferences.
+Apply the injected `taste.md` instructions within these review boundaries. If reading this file independently, first read `./taste.md` relative to this installed file. Descriptive taste maintenance is permitted; review suggestions are not evidence of the user's preferences.
 
 Keep the review inexpensive: use existing notes and a bounded sample, not every checklist or full histories. Use a cheap `read-collect` helper only when useful and authorized for those sources. Scheduled reviews follow their current registry entry and access boundaries. Stop repeatedly failing checks for this run, record the gap and next step in task notes, and respect agreed limits rather than expanding the search.
 

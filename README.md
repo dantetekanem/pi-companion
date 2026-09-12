@@ -1,6 +1,6 @@
 # pi-companion
 
-A prompt designed for long-horizon assistance, packaged as a [Pi](https://pi.dev) extension. Read the prompts for [onboarding and recurring work](src/prompt.md), [workflow reviews](src/review-prompt.md), [learning preferences](taste.md), and [following reports in Herdr](tail.md).
+A prompt designed for long-horizon assistance, packaged as a [Pi](https://pi.dev) extension. Read the prompts for [onboarding and recurring work](src/prompts/prompt.md), [workflow reviews](src/prompts/review-prompt.md), [learning preferences](src/prompts/taste.md), and [following reports in Herdr](src/prompts/tail.md).
 
 Most conversations with an agent begin with a request and end with an answer. But routines, goals, and interests need attention over time. Companion helps you build recurring workflows around them, carrying context forward instead of making you explain everything again.
 

@@ -6,7 +6,7 @@
   "description": "Session-scoped Companion schedules with append-only Markdown updates and reports for Pi.",
   "keywords": ["pi-package"],
   "repository": "https://github.com/dantetekanem/pi-companion",
-  "files": ["src", "taste.md", "tail.md", "README.md"],
+  "files": ["src", "README.md"],
   "pi": { "extensions": ["./src/index.ts"] },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",

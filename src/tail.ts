@@ -30,6 +30,6 @@ export function companionTailNotice(paths: LocationPaths): string | undefined {
   try {
     const location = JSON.parse(readFileSync(locationFile(paths, workspace), 'utf8'));
     if (location?.workspace !== workspace || !nonempty(location.pane) || location.pane === process.env.HERDR_PANE_ID) return;
-    return `${readFileSync(new URL('../tail.md', import.meta.url), 'utf8')}\nCompanion location: pane ${location.pane} (workspace ${workspace})`;
+    return `${readFileSync(new URL('./prompts/tail.md', import.meta.url), 'utf8')}\nCompanion location: pane ${location.pane} (workspace ${workspace})`;
   } catch { /* Missing or invalid location files produce no notice. */ }
 }
