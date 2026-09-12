@@ -1,27 +1,30 @@
 # pi-companion
 
-A personal assistant inside [Pi](https://pi.dev) that keeps up with your routines, goals, and the information you care about.
+A prompt designed for long-horizon assistance, packaged as a [Pi](https://pi.dev) extension. Read the prompts for [onboarding and recurring work](src/prompt.md), [workflow reviews](src/review-prompt.md), [learning preferences](taste.md), and [following reports in Herdr](tail.md).
 
-Companion talks with you about what to follow, which sources it can use (such as email, calendars, Slack, or notes), and how often to check them. With your approval, it sets up recurring checks and keeps notes between runs so you don't have to start from scratch each time.
+Most conversations with an agent begin with a request and end with an answer. But routines, goals, and interests need attention over time. Companion helps you build recurring workflows around them, carrying context forward instead of making you explain everything again.
 
-It appends important findings and requested reports to `~/.companion-reports-updates.md`. Routine checks with nothing new stay in its notes. It also remembers preferences you share and can review whether its schedules are still useful.
+## How it works
 
-## Get started
+Companion starts with a conversation about your days, responsibilities, and what you want help keeping up with. Together, you decide which work is worth repeating, what information it needs, and how often it should happen.
 
-Requires Pi with 0.85.1-compatible APIs. Install your checkout with `pi install /path/to/pi-companion`, run `/reload`, then `/companion`.
+That might mean a morning briefing from approved sources, a weekly review of your goals, or research into an ongoing interest. You approve the sources and schedules before recurring work begins.
 
-To try it for one invocation instead:
+Between runs, Companion keeps working notes and remembers preferences you share. It uses that context to distinguish useful changes from repetition, appending important findings and requested reports to `~/.companion-reports-updates.md`. Routine checks with nothing new stay in its notes.
+
+As your priorities change, you can review the workflows together: keep what helps, adjust what needs attention, and stop what no longer matters.
+
+## Installation
 
 ```sh
-pi -e ./src/index.ts
+pi install git:github.com/dantetekanem/pi-companion
+pi install git:github.com/jl1990/pi-scheduler
 ```
 
-Recurring checks require [Pi Scheduler](https://pi.dev/packages/@jl1990/pi-scheduler?name=pi-scheduler) and Pi running in the session that owns them. Companion asks before setting up integrations or scheduled work.
+Run `/reload` in Pi, then `/companion` to get started. Recurring work requires Pi to remain running in the session that owns the schedules.
 
 ## Commands
 
-- `/companion` or `/companion start`: start setup or return to Companion; resume schedules it paused.
-- `/companion stop`: pause this session's Companion schedules without deleting their history.
-- `/companion review`: assess current schedules and suggest improvements for your approval.
-
-Schedules live in `~/.companion-schedules.md`; working notes and learned preferences live in `~/.companion-notes/`. Each Pi session controls its own schedules. In Herdr, other sessions can find Companion's last-known pane, and you can approve a separate pane to follow its reports live.
+- `/companion` or `/companion start`: begin setup or return to Companion and resume schedules it paused.
+- `/companion stop`: pause this session's Companion schedules.
+- `/companion review`: assess how useful the current workflows are and propose improvements.
