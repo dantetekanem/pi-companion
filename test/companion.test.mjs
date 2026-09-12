@@ -153,8 +153,9 @@ test('storage failures clear an already displayed footer for commands', async t 
 
 test('start and bare companion send bundled instructions directly; autocomplete follows Pi\'s null contract', async t => {
   const h = harness(t), command = h.commands.get('companion');
-  assert.deepEqual(command.getArgumentCompletions('')?.map(item => item.value), ['start', 'stop']);
+  assert.deepEqual(command.getArgumentCompletions('')?.map(item => item.value), ['start', 'stop', 'review']);
   assert.deepEqual(command.getArgumentCompletions('sta')?.map(item => item.value), ['start']);
+  assert.deepEqual(command.getArgumentCompletions('rev')?.map(item => item.value), ['review']);
   assert.equal(command.getArgumentCompletions('missing'), null);
   await h.command('start'); await h.command('');
   assert.deepEqual(h.messages, [
@@ -162,6 +163,17 @@ test('start and bare companion send bundled instructions directly; autocomplete 
     { content: companionInstructions, options: { deliverAs: 'followUp' } },
   ]);
   assert.equal(h.selections.length, 0);
+});
+
+test('review injects bundled instructions without starting Companion or requiring scheduler setup', async t => {
+  const h = harness(t), store = new Store(h.dir, 'owner'), before = store.load();
+  await h.command('review');
+  assert.equal(h.messages.length, 1);
+  assert.deepEqual(h.messages, [{
+    content: readFileSync(new URL('../src/review-prompt.md', import.meta.url), 'utf8'),
+    options: { deliverAs: 'followUp' },
+  }]);
+  assert.deepEqual(store.load(), before);
 });
 
 test('footer counts current-session active schedules and refreshes after agent work', async t => {

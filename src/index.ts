@@ -60,15 +60,19 @@ export function registerCompanion(pi: ExtensionAPI, paths: Paths): void {
     if (input.scope !== undefined && input.scope !== 'session') return { block: true, reason: 'Companion schedules must use session scope.' };
   });
   pi.registerCommand('companion', {
-    description: 'Start or stop Companion (session-owned schedules).',
+    description: 'Start, stop, or review Companion (session-owned schedules).',
     getArgumentCompletions: prefix => {
-      const items = ['start', 'stop'].filter(value => value.startsWith(prefix)).map(value => ({ value, label: value }));
+      const items = ['start', 'stop', 'review'].filter(value => value.startsWith(prefix)).map(value => ({ value, label: value }));
       return items.length ? items : null;
     },
     handler: async (args, ctx) => {
       const action = args.trim(), token = generation;
       const active = () => generation === token;
       try {
+        if (action === 'review') {
+          pi.sendUserMessage(readFileSync(new URL('./review-prompt.md', import.meta.url), 'utf8'), { deliverAs: 'followUp' });
+          return;
+        }
         if (action === '' || action === 'start') {
           const store = storeFor(ctx), state = store.load();
           state.started = true;
@@ -86,7 +90,7 @@ export function registerCompanion(pi: ExtensionAPI, paths: Paths): void {
           refresh(ctx);
           return;
         }
-        throw new Error('Usage: /companion [start|stop]');
+        throw new Error('Usage: /companion [start|stop|review]');
       } catch (error) {
         if (active()) refresh(ctx);
         if (active() && ctx.hasUI) ctx.ui.notify(error instanceof Error ? error.message : 'Companion failed.', 'error');

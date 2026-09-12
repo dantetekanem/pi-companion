@@ -2,7 +2,7 @@
 
 Companion schedules checks in Pi and tells the agent to append important updates and reports to `~/.companion-reports-updates.md`.
 
-The first startup task asks whether to follow that file with `tail -f` in a new Herdr pane below the current pane. The agent opens it only after approval. Declining does not block setup. The file is shared across sessions, append-only, and has no unread state or updates/reports UI. Routine no-change checks stay in `~/.companion-notes/`.
+The reports file is shared across sessions, append-only, and has no unread state or updates/reports UI. Routine no-change checks stay in `~/.companion-notes/`. After onboarding, the agent offers to follow reports with `tail -f` in a new Herdr pane below the current pane, only with approval.
 
 The footer shows only active schedules: `Companion · 3 schedules`, and only after `/companion` or `/companion start` has run in that session. This started state survives reloads.
 
@@ -18,6 +18,16 @@ pi -e ./src/index.ts
 
 Each session can run Companion independently, with its own schedules and schedule-control state. Installation does not create schedules or import existing notes or saved results.
 
+## First-start onboarding
+
+The bundled prompt starts with a mid-tier model recommendation and inexpensive `read-collect` helpers, then guides a conversation about normal days, Mondays and Fridays, weekly and monthly routines, goals, and habits. It asks which sources are useful, including email, Slack, calendars, and notes, whether to find missing MCP integrations, and whether selected local Pi sessions may inform the setup. Access and recurring use require agreement.
+
+The agent checks available tools and existing tasks before proposing setup. It offers help with [Pi Scheduler](https://pi.dev/packages/@jl1990/pi-scheduler?name=pi-scheduler), [pi-extended-teams](https://github.com/dantetekanem/pi-extended-teams), or [pi-voice-shortcut](https://github.com/dantetekanem/pi-voice-shortcut) when needed. Voice onboarding recommends transcript-only input for review before sending. Installs and configuration changes require approval, followed by `/reload` and an availability check; typing and direct collection remain options.
+
+With approval, the agent creates missing artifacts and populates `~/.companion-schedules.md`, `~/.companion-notes/onboarding.md`, and task notes from confirmed answers. A new `~/.companion-reports-updates.md` gets a heading and purpose, not a sample report. Existing content is preserved, and returning users resume instead of repeating the interview.
+
+The first proposed schedule is a weekly morning Companion review: the same instructions as `/companion review`, using approved prior context and notes to assess schedules, propose worthwhile improvements, and preserve continuity. The user confirms its day, time, timezone, sources, and budget before it is scheduled. Its registry entry references the installed `src/review-prompt.md` by absolute path, and the scheduled prompt asks the agent to read it; a bare slash command is not dispatched by the scheduler. This is an opt-in proposal, not an automatic default; scheduled work requires Pi to be running in its owning session.
+
 ## Commands
 
 | Command | Action |
@@ -25,6 +35,9 @@ Each session can run Companion independently, with its own schedules and schedul
 | `/companion` | Start Companion (equivalent to `/companion start`) |
 | `/companion start` | Resume Companion-paused schedules, then send the bundled Companion instructions |
 | `/companion stop` | Stop this session's approved recurring Companion schedules |
+| `/companion review` | Review current schedules and Companion's usefulness; propose improvements if warranted |
+
+Review only sends the bundled `src/review-prompt.md` instructions to the agent. It does not start Companion or control schedules. The prompt directs useful findings to the same append-only reports file, leaves existing Herdr tail panes alone, and requires approval before applying any proposal. No worthwhile change is a valid result.
 
 Start reads `src/prompt.md` and sends its contents directly to the agent. It resumes only unchanged, still-approved schedules stopped by Companion; with no saved pause receipts, it does not require schedule control. Stop preserves history, the schedule-count footer, and schedule-control receipts. A firing delivery finishes without being aborted; Companion then disables its next recurrence. Unfinished stop requests resume in the same session after reloads.
 

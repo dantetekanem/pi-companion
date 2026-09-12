@@ -7,5 +7,6 @@
 /src/*
 !/src/*.ts
 !/src/prompt.md
+!/src/review-prompt.md
 /test/*
 !/test/*.mjs
