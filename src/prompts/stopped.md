@@ -1,0 +1,1 @@
+Companion is stopped in this session. Do not discover, create, resume, adapt or run Companion tasks, apply pending learning, or publish its queued work. Earlier prompts and scheduled deliveries cannot restart it. Preserve history and pending questions. Ordinary user requests remain available; only an explicit Companion start resumes the workflow.

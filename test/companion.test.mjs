@@ -7,12 +7,11 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
 // Use Pi's already installed loader and bundled peers; never install during tests.
-const require = createRequire(process.env.PI_PACKAGE_ROOT
-  ? join(process.env.PI_PACKAGE_ROOT, 'package.json') : import.meta.url);
-const root = process.env.PI_PACKAGE_ROOT || resolve(require.resolve('@earendil-works/pi-coding-agent'), '../..');
+const root = process.env.PI_PACKAGE_ROOT || resolve(fileURLToPath(import.meta.resolve('@earendil-works/pi-coding-agent')), '../..');
+const require = createRequire(join(root, 'package.json'));
 const { createJiti } = require('jiti');
 const host = createJiti(join(root, 'package.json'));
-const aliases = Object.fromEntries(['@earendil-works/pi-coding-agent', '@earendil-works/pi-tui', 'typebox/value', 'typebox']
+const aliases = Object.fromEntries(['@earendil-works/pi-coding-agent', '@earendil-works/pi-tui', '@earendil-works/pi-ai', 'typebox/value', 'typebox']
   .map(name => [name, fileURLToPath(host.esmResolve(name))]));
 const jiti = createJiti(import.meta.url, { moduleCache: false, alias: aliases });
 const { Store } = await jiti.import('../src/store.ts');
@@ -108,56 +107,58 @@ test('a failed durable write does not produce a saved result', t => {
 
 function harness(t, sessionId = 'owner', paths) {
   const fixturePaths = paths ?? fixture(t);
-  const options = { root: fixturePaths.dir, locationRoot: fixturePaths.dir, schedulerFile: join(fixturePaths.dir, 'tasks.json'), schedulesFile: join(fixturePaths.dir, 'schedules.md') };
-  const events = new Map(), tools = new Map(), commands = new Map(), statuses = [], notices = [], selections = [];
-  const ctx = { mode: 'tui', hasUI: true, sessionManager: { getSessionId: () => sessionId, getSessionFile: () => `${sessionId}.jsonl` },
-    ui: { setStatus: (key, value) => statuses.push([key, value]), notify: (...args) => notices.push(args),
+  const options = { root: fixturePaths.dir, locationRoot: fixturePaths.dir, schedulerFile: join(fixturePaths.dir, 'tasks.json'), schedulesFile: join(fixturePaths.dir, 'schedules.md'), reportsFile: join(fixturePaths.dir, 'reports.md'), reviewSettingsFile: join(fixturePaths.dir, 'teams.json') };
+  const events = new Map(), tools = new Map(), commands = new Map(), notices = [], selections = [];
+  const ctx = { mode: 'tui', hasUI: true, isIdle: () => true, sessionManager: { getSessionId: () => sessionId, getSessionFile: () => `${sessionId}.jsonl`, getLeafId: () => 'leaf' },
+    ui: { notify: (...args) => notices.push(args),
       select: async (title, choices) => { selections.push({ title, choices }); return undefined; }, custom: async () => false } };
   const messages = [], pi = { on: (name, fn) => events.set(name, fn), registerTool: tool => tools.set(tool.name, tool),
     registerCommand: (name, command) => commands.set(name, command), getCommands: () => [],
     exec: async () => ({ code: 1, stdout: '', stderr: 'Herdr unavailable', killed: false }),
     sendUserMessage: (content, options) => messages.push({ content, options }) };
   registerCompanion(pi, options);
-  return { ...fixturePaths, pi, ctx, options, events, tools, commands, statuses, notices, selections, messages,
+  return { ...fixturePaths, pi, ctx, options, events, tools, commands, notices, selections, messages,
     command: args => commands.get('companion').handler(args, ctx),
     ingest: params => new Store(fixturePaths.dir, sessionId).ingest(params) };
 }
 
-test('started session footer survives reload without manufacturing results', async t => {
-  const h = harness(t);
-  await h.command('start');
-  await h.events.get('session_start')({}, h.ctx);
-  assert.equal(h.statuses.at(-1)[1], 'Companion');
-  for (const event of ['input', 'agent_end', 'agent_settled', 'tool_result']) await h.events.get(event)?.({ task: { status: 'fired' } }, h.ctx);
-  assert.equal(new Store(h.dir, 'owner').load().items.length, 0);
-  await h.ingest(report());
-  assert.equal(h.statuses.at(-1)[1], 'Companion');
-  const reloaded = harness(t, 'owner', h);
-  await reloaded.events.get('session_start')({}, reloaded.ctx);
-  assert.equal(reloaded.statuses.at(-1)[1], 'Companion');
-  const other = harness(t, 'other', h);
-  await other.events.get('session_start')({}, other.ctx);
-  assert.equal(other.statuses.at(-1)[1], undefined);
-  await h.ingest(update());
-  assert.equal(other.statuses.at(-1)[1], undefined);
+test('legacy reload migrates proven activity but preserves paused, stopping and ambiguous sessions', async t => {
+  for (const mode of ['active', 'paused', 'stopping', 'ambiguous']) {
+    const h = schedulerFixture(t), runtime = harness(t, 'owner', h);
+    const state = h.store.load();
+    state.started = true;
+    if (mode === 'paused') state.paused.push({ id: 'task_owned', signature: 'legacy', disabledAt: 'before' });
+    if (mode === 'stopping') state.stopping.push({ id: 'task_owned', signature: 'legacy' });
+    if (mode === 'ambiguous') { h.tasks[0].enabled = false; h.save(); }
+    h.store.save(state);
+    await runtime.events.get('session_start')({}, runtime.ctx);
+    assert.equal(h.store.load().experience.enabled, mode === 'active');
+    const context = await runtime.events.get('before_agent_start')({}, runtime.ctx);
+    assert.match(context.message.content, mode === 'active' ? /Companion is running/ : /Companion is stopped/);
+  }
 });
 
-test('storage failures clear an already displayed footer for commands', async t => {
-  for (const action of ['start', '']) {
-    const h = harness(t);
-    await h.command('start');
-    assert.equal(h.statuses.at(-1)[1], 'Companion');
-    writeFileSync(new Store(h.dir, 'owner').file, '{broken');
-    await h.command(action);
-    assert.equal(h.statuses.at(-1)[1], undefined);
-  }
+test('stopped state is durable even when scheduler control fails', async t => {
+  const h = harness(t);
+  await h.command('start');
+  await h.command('stop');
+  assert.equal(new Store(h.dir, 'owner').load().experience.enabled, false);
+});
+
+test('stopped Companion blocks queued resumption of owned tasks but preserves unrelated schedules', async t => {
+  const h = schedulerFixture(t), runtime = harness(t, 'owner', h);
+  await runtime.command('stop');
+  const gate = runtime.events.get('tool_call');
+  assert.equal((await gate({ toolName: 'schedule_task', input: { name: 'Reading' } }, runtime.ctx)).block, true);
+  assert.equal((await gate({ toolName: 'manage_scheduled_task', input: { action: 'enable', id: 'task_owned' } }, runtime.ctx)).block, true);
+  assert.equal(await gate({ toolName: 'manage_scheduled_task', input: { action: 'enable', id: 'task_other' } }, runtime.ctx), undefined);
+  assert.equal(await gate({ toolName: 'schedule_task', input: { name: 'CI poll' } }, runtime.ctx), undefined);
 });
 
 test('every start and bare companion send main and taste instructions; autocomplete follows Pi\'s null contract', async t => {
   const h = harness(t), command = h.commands.get('companion');
-  assert.deepEqual(command.getArgumentCompletions('')?.map(item => item.value), ['start', 'stop', 'review']);
+  assert.deepEqual(command.getArgumentCompletions('')?.map(item => item.value), ['start', 'stop']);
   assert.deepEqual(command.getArgumentCompletions('sta')?.map(item => item.value), ['start']);
-  assert.deepEqual(command.getArgumentCompletions('rev')?.map(item => item.value), ['review']);
   assert.equal(command.getArgumentCompletions('missing'), null);
   await h.command('start'); await h.command('');
   assert.deepEqual(h.messages, [
@@ -165,17 +166,6 @@ test('every start and bare companion send main and taste instructions; autocompl
     { content: companionInstructions, options: { deliverAs: 'followUp' } },
   ]);
   assert.equal(h.selections.length, 0);
-});
-
-test('review injects review and taste instructions without starting Companion or requiring scheduler setup', async t => {
-  const h = harness(t), store = new Store(h.dir, 'owner'), before = store.load();
-  await h.command('review');
-  assert.equal(h.messages.length, 1);
-  assert.deepEqual(h.messages, [{
-    content: [readFileSync(new URL('../src/prompts/review-prompt.md', import.meta.url), 'utf8'), tasteInstructions].join('\n\n'),
-    options: { deliverAs: 'followUp' },
-  }]);
-  assert.deepEqual(store.load(), before);
 });
 
 function locationHarness(t, h = harness(t)) {
@@ -238,38 +228,15 @@ test('Companion location failures do not block start and stale start cannot regi
     assert.throws(() => statSync(h.file), { code: 'ENOENT' });
   }
   assert.equal(h.messages.length, 3);
-  let release;
-  h.pi.exec = () => new Promise(resolve => { release = resolve; });
+  let release, entered;
+  const executing = new Promise(resolve => { entered = resolve; });
+  h.pi.exec = () => new Promise(resolve => { release = resolve; entered(); });
   const starting = h.command('start');
+  await executing;
   await h.events.get('session_shutdown')({}, h.ctx);
   release({ code: 0, stdout: JSON.stringify({ result: { pane: h.pane } }) });
   await starting;
   assert.throws(() => statSync(h.file), { code: 'ENOENT' });
-});
-
-test('footer counts current-session active schedules and refreshes after agent work', async t => {
-  const scheduler = schedulerFixture(t);
-  const runtime = harness(t, 'owner', scheduler);
-  await runtime.events.get('session_start')({}, runtime.ctx);
-  assert.equal(runtime.statuses.at(-1)[1], undefined);
-  await runtime.ingest(report());
-  assert.equal(runtime.statuses.at(-1)[1], undefined);
-  await runtime.command('start');
-  assert.equal(runtime.statuses.at(-1)[1], 'Companion · 1 schedule');
-  scheduler.tasks.push({ ...scheduler.tasks[0], id: 'task_running', status: 'running' });
-  scheduler.save();
-  await runtime.events.get('agent_end')({}, runtime.ctx);
-  assert.equal(runtime.statuses.at(-1)[1], 'Companion · 2 schedules');
-  await runtime.ingest(update());
-  assert.equal(runtime.statuses.at(-1)[1], 'Companion · 2 schedules');
-  scheduler.tasks[0].enabled = false;
-  scheduler.tasks.at(-1).status = 'failed';
-  scheduler.save();
-  await runtime.events.get('agent_end')({}, runtime.ctx);
-  assert.equal(runtime.statuses.at(-1)[1], 'Companion · 0 schedules');
-  writeFileSync(scheduler.options.schedulerFile, '{broken');
-  await runtime.events.get('agent_end')({}, runtime.ctx);
-  assert.equal(runtime.statuses.at(-1)[1], 'Companion');
 });
 
 test('sessions independently start Companion and stop only their own schedules', async t => {
@@ -285,11 +252,9 @@ test('sessions independently start Companion and stop only their own schedules',
     await runtime.command('start');
     assert.equal(runtime.messages.length, 1);
     await runtime.ingest(report());
-    assert.equal(runtime.statuses.at(-1)[1], 'Companion · 1 schedule');
   }
   await second.command('stop');
   assert.deepEqual(scheduler.sent, ['/schedule-disable task_other']);
-  assert.equal(second.statuses.at(-1)[1], 'Companion · 0 schedules');
   assert.equal(scheduler.tasks[0].enabled, true);
   await first.command('stop');
   assert.deepEqual(scheduler.sent, ['/schedule-disable task_other', '/schedule-disable task_owned']);
@@ -384,7 +349,6 @@ test('successful session recovery completes the stop and preserves saved results
   Object.assign(runtime.pi, { getCommands: h.pi.getCommands, sendUserMessage: h.pi.sendUserMessage });
   await runtime.command('start');
   await runtime.ingest(report('recovery-history'));
-  assert.equal(runtime.statuses.at(-1)[1], 'Companion · 1 schedule');
   const stopping = runtime.command('stop');
   assert.equal(new Store(h.dir, 'owner').load().stopping.length, 1);
   await runtime.events.get('session_shutdown')({}, runtime.ctx);
@@ -398,12 +362,11 @@ test('successful session recovery completes the stop and preserves saved results
   await new Promise(setImmediate);
   assert.equal(h.store.load().stopping.length, 0);
   assert.equal(h.store.load().paused.length, 1);
-  assert.equal(runtime.statuses.at(-1)[1], 'Companion · 0 schedules');
   await other.command('start');
   assert.equal(other.messages.length, 1);
 });
 
-test('failed session recovery reports the pending stop and preserves its footer', async t => {
+test('failed session recovery reports the pending stop and retains its receipt', async t => {
   const h = schedulerFixture(t); h.tasks[0].status = 'running'; h.save();
   const runtime = harness(t, 'owner', h);
   Object.assign(runtime.pi, { getCommands: h.pi.getCommands, sendUserMessage: h.pi.sendUserMessage });
@@ -422,7 +385,6 @@ test('failed session recovery reports the pending stop and preserves its footer'
   const [message] = await notified;
   assert.match(message, /stop remains pending/);
   assert.equal(h.store.load().stopping.length, 1);
-  assert.equal(runtime.statuses.at(-1)[1], 'Companion · 1 schedule');
 });
 
 test('immediate shutdown/start chains recovery after the interrupted control clears', async t => {
