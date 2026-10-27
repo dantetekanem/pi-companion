@@ -8,8 +8,9 @@ examples, presentation, and choices without making the user repeat their taste.
 ## When to use it
 
 Apply these instructions throughout Companion: onboarding, ordinary conversation,
-requests, corrections, feedback, reviews, and scheduled work. Start loads the
-instructions; new evidence triggers updates. Do not wait for a schedule or review.
+requests, corrections, feedback, reviews, and scheduled work. Initial setup loads
+the instructions; returning starts reuse the saved conversation. New evidence
+triggers updates. Do not wait for a schedule or review.
 Answer the user's actual request while evaluating any preference-bearing input.
 Most inputs require no update or separate agent turn.
 

@@ -4,12 +4,16 @@ A [Pi](https://pi.dev) extension for assistance that continues across days. Comp
 
 ## Start and stop
 
-- `/companion` or `/companion start`: begin or resume Companion and its automatic daily reflection.
-- `/companion stop`: stop learning and pause this session's Companion schedules, preserving history and unanswered questions.
+- `/companion` or `/companion start`: begin or resume the saved Companion conversation and its daily reflection.
+- `/companion stop`: stop learning and pause the owning session's Companion schedules, preserving history and unanswered questions. Run it in that session.
 
-Starting Companion in a new session always creates that session's routine schedules from the saved registry, even if equivalent schedules exist in another session. It does not ask which session should own the work, and it leaves other sessions untouched. Deduplication applies only within the current session.
+Returning starts use Pi Durable checkpoints without submitting a model setup turn. They do not scan notes, generate resume documents, or recreate routines. A start from a different Pi conversation switches to the saved owner; if another process already owns Companion, it reports that rather than taking over. Other sessions' schedules remain untouched.
 
-Recurring work requires Pi running in the owning session. Within that session, start resumes only schedules Companion itself paused, not tasks cancelled, edited or stopped outside Companion. An older saved session resumes automatically only when active owned schedules establish that it was running and no pause/stop receipts contradict that; ambiguous legacy state remains stopped.
+Recurring work requires Pi running in the owning session. Start resumes only schedules Companion itself paused, not tasks cancelled, edited or stopped outside Companion. On first adoption after upgrading, run `/companion start` in the existing Companion conversation. Its saved state and schedules are reused without reading private histories. If a registry exists but the current conversation has no saved setup or active approved routines, adoption fails visibly instead of rebuilding it elsewhere.
+
+A daily-reflection stop failure does not prevent pausing owned routines. Failures and scheduler receipts remain saved and visible after restart. Once the scheduler issue is corrected, run `/companion stop` again to retry; a failed control is not reported as completed.
+
+A genuinely new Companion sends its setup instructions once. The dispatch is reserved before sending; a crash in that gap does not cause an automatic retry. If initial setup was interrupted, continue in the saved conversation. An unavailable or deleted owning session is an error, not permission to replace it.
 
 ## How it learns
 
@@ -26,6 +30,10 @@ Reflection reviews bounded evidence, retains incremental lessons, links clear an
 Companion can interview you whenever it needs context. It can also leave questions in `~/.companion-reports-updates.md`, the same append-only Markdown feed used for important findings. Answer normally in the Companion conversation; those answers inform later decisions. Unanswered questions remain pending without repeated nudges. Routine no-news runs stay quiet. Tail the file in your existing tracking pane; Companion does not create another feed or unread counter.
 
 ## Runtime boundaries
+
+Pi Durable **1.1.0** (experimental) owns model-free start/stop tasks in `companion/durable/companion.sqlite` under Pi's agent directory. A typed document stores the owner, setup-dispatch reservation, and control-task identity. Tasks checkpoint between daily-reflection control and routine control; after interruption, the remaining phase reconciles existing scheduler receipts before acting. Quit, reload, and session replacement close the Harness and release its process lock. After an unclean process death, a stale lock may take up to five minutes to expire; never delete a live owner's lock.
+
+This integration does not move ordinary model turns, tool calls, scheduled checks, or reflection into Durable. Pi and its installed extensions still execute them. Durable has no configured model providers here, and no generic bridge from Pi tool metadata to executable tools. SQLite uses WAL with `synchronous=NORMAL`: checkpoints survive process crashes, but the latest commits may be lost after power failure. See [Pi Durable's storage contract](https://github.com/earendil-works/pi/blob/v1.1.0/packages/durable/README.md#storage).
 
 Experience, question links, lesson revisions, decisions and review receipts live in the existing session storage under Pi's agent directory (`companion/<session-hash>.json`). Older evidence remains on disk. Context excludes evidence and derived memory from another provider. The agent should record only material permitted for that provider; the extension does not crawl accounts, archives or notes for the reflector.
 
@@ -48,6 +56,6 @@ pi install git:github.com/dantetekanem/pi-companion
 pi install git:github.com/jl1990/pi-scheduler
 ```
 
-Run `/reload`, then `/companion`. Automatic reflection reuses an existing Teams `read-critical` favorite. The extension never installs integrations or changes that mapping itself.
+Requires Node 22.19 or newer. The package includes Pi Durable and its runtime dependencies; it does not install or start a daemon. Run `/reload`, then `/companion` in the existing Companion conversation when upgrading. Automatic reflection reuses an existing Teams `read-critical` favorite. The extension never installs integrations or changes that mapping itself.
 
 See the [agent instructions](src/prompts/prompt.md), [daily reflection contract](src/prompts/reflection.md) and [taste guidance](src/prompts/taste.md).

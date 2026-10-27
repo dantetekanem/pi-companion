@@ -1,8 +1,9 @@
 import { getAgentDir, type ExtensionAPI, type ExtensionContext } from '@earendil-works/pi-coding-agent';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from './store.ts';
+import type { DurableCompanion, CompanionControls } from './durable.ts';
 import { ExperienceStore } from './experience.ts';
 import { registerReinforcement, type ReinforcementPaths } from './reinforcement.ts';
 import { scheduledTasks } from './review-scheduler.ts';
@@ -21,6 +22,42 @@ export function registerCompanion(pi: ExtensionAPI, paths: Paths): void {
   let control: Promise<void> | undefined;
   const sessionId = (ctx: ExtensionContext) => ctx.sessionManager.getSessionId();
   const storeFor = (ctx: ExtensionContext) => new Store(paths.root, sessionId(ctx));
+  const durableDirectory = join(paths.root, 'durable');
+  const hasCheckpoint = () => existsSync(join(durableDirectory, 'companion.sqlite'));
+  let runtime: Promise<DurableCompanion> | undefined;
+  let closing = Promise.resolve();
+  const openRuntime = async (ctx: ExtensionContext) => {
+    const token = generation;
+    await closing;
+    if (generation !== token) throw Error('Companion session changed before opening its checkpoint.');
+    if (!runtime) {
+      const sessionFile = ctx.sessionManager.getSessionFile();
+      if (!sessionFile) throw Error('Companion requires a saved Pi session.');
+      const configured = storeFor(ctx).load().started === true || (countSchedules(ctx, paths) ?? 0) > 0;
+      if (!hasCheckpoint() && !configured && existsSync(paths.schedulesFile)) {
+        throw Error('Run /companion start in your existing Companion session once to adopt it. Saved routines will not be rebuilt here.');
+      }
+      runtime = import('./durable.ts').then(({ DurableCompanion }) =>
+        DurableCompanion.open(durableDirectory, { sessionId: sessionId(ctx), sessionFile }, configured));
+      runtime.catch(() => { runtime = undefined; });
+    }
+    const opened = await runtime;
+    if (generation !== token) throw Error('Companion session changed while opening its checkpoint.');
+    return opened;
+  };
+  const closeRuntime = async () => {
+    const current = runtime;
+    runtime = undefined;
+    closing = closing.then(async () => {
+      const opened = await current?.catch(() => undefined);
+      await opened?.close();
+    });
+    await closing;
+  };
+  const ownsRuntime = async (opened: DurableCompanion, ctx: ExtensionContext) => {
+    const owner = (await opened.state()).owner;
+    return owner?.sessionId === sessionId(ctx) && owner.sessionFile === ctx.sessionManager.getSessionFile();
+  };
   const isCompanionSchedule = (name: unknown) => {
     if (typeof name !== 'string') return false;
     try {
@@ -28,20 +65,42 @@ export function registerCompanion(pi: ExtensionAPI, paths: Paths): void {
       return headings.has(name.trim());
     } catch { return false; }
   };
-  const runControl = async (action: 'start' | 'stop' | 'finish-stop', ctx: ExtensionContext) => {
+  const runControl = async (action: 'start' | 'stop' | 'finish-stop', ctx: ExtensionContext, signal?: AbortSignal) => {
     const token = generation;
     if (control) {
       if (action !== 'finish-stop') throw new Error('Companion schedule control is already running.');
       await control.catch(() => {});
       if (generation !== token) return;
     }
-    const operation = controlSchedules(action, pi, ctx, storeFor(ctx), { ...paths, isActive: () => generation === token })
+    const operation = controlSchedules(action, pi, ctx, storeFor(ctx), { ...paths, isActive: () => generation === token && !signal?.aborted })
       .then(message => {
         if (generation === token && ctx.hasUI) ctx.ui.notify(message, 'info');
       });
     const tracked: Promise<void> = operation.finally(() => { if (control === tracked) control = undefined; });
     control = tracked;
     await tracked;
+  };
+  const controlsFor = (ctx: ExtensionContext, token: number): CompanionControls => {
+    const active = (signal: AbortSignal) => {
+      signal.throwIfAborted();
+      if (generation !== token) throw Error('Companion session changed during control.');
+    };
+    return {
+      daily: async (action, signal) => {
+        active(signal);
+        if (action === 'start') {
+          const store = storeFor(ctx), state = store.load();
+          state.started = true;
+          store.save(state);
+          await reinforcement.start(ctx);
+        } else await reinforcement.stop(ctx);
+      },
+      routines: async (action, signal) => {
+        active(signal);
+        if (storeFor(ctx).load().stopping.length) await runControl('finish-stop', ctx, signal);
+        if (action === 'stop' || storeFor(ctx).load().paused.length) await runControl(action, ctx, signal);
+      },
+    };
   };
   pi.on('before_agent_start', (_event, ctx) => {
     const tail = tailPending ? companionTailNotice(paths) : undefined;
@@ -61,6 +120,14 @@ export function registerCompanion(pi: ExtensionAPI, paths: Paths): void {
           memory.enabled = !state.paused.length && !state.stopping.length && (countSchedules(ctx, paths) ?? 0) > 0;
         });
       }
+      if (hasCheckpoint() && state.started) {
+        const opened = await openRuntime(ctx);
+        if (!await ownsRuntime(opened, ctx)) {
+          await closeRuntime();
+          return;
+        }
+        await opened.recover(controlsFor(ctx, token));
+      }
       if (storeFor(ctx).load().stopping.length) void runControl('finish-stop', ctx).catch(error => {
         if (generation === token && ctx.hasUI) ctx.ui.notify(`Companion stop remains pending: ${error.message}`, 'error');
       });
@@ -69,7 +136,11 @@ export function registerCompanion(pi: ExtensionAPI, paths: Paths): void {
       else if (memory?.wake) await reinforcement.stop(ctx);
     } catch (error) { if (ctx.hasUI) ctx.ui.notify(`Companion recovery: ${error instanceof Error ? error.message : 'failed'}`, 'error'); }
   });
-  pi.on('session_shutdown', () => { generation++; reinforcement.shutdown(); });
+  pi.on('session_shutdown', async () => {
+    generation++;
+    reinforcement.shutdown();
+    await closeRuntime();
+  });
   pi.on('tool_call', (event, ctx) => {
     if (event.toolName === 'manage_scheduled_task' && storeFor(ctx).load().experience?.enabled === false) {
       const input = event.input as { id?: unknown; action?: unknown };
@@ -96,26 +167,45 @@ export function registerCompanion(pi: ExtensionAPI, paths: Paths): void {
       const active = () => generation === token;
       try {
         if (action === '' || action === 'start') {
-          const store = storeFor(ctx), state = store.load();
-          state.started = true;
-          store.save(state);
-          try {
-            const daily = reinforcement.start(ctx);
-            const schedules = storeFor(ctx).load().paused.length ? runControl('start', ctx) : Promise.resolve();
-            const results = await Promise.allSettled([daily, schedules]);
-            const failure = results.find(result => result.status === 'rejected');
-            if (failure?.status === 'rejected') throw failure.reason;
-          } finally {
-            const stillStarted = () => active() && storeFor(ctx).load().experience?.enabled === true;
-            if (stillStarted()) await saveCompanionLocation(pi, paths, stillStarted);
-            if (stillStarted()) pi.sendUserMessage(instructions(), { deliverAs: 'followUp' });
+          const opened = await openRuntime(ctx);
+          if (!await ownsRuntime(opened, ctx)) {
+            const owner = (await opened.state()).owner;
+            await closeRuntime();
+            if (!owner) throw Error('Companion has no saved owning session.');
+            if (typeof ctx.switchSession !== 'function') throw Error(`Resume the saved Companion session: ${owner.sessionFile}`);
+            await ctx.switchSession(owner.sessionFile, { withSession: async fresh => {
+              await fresh.sendUserMessage('/companion start', { expandPromptTemplates: true, deliverAs: 'followUp' });
+            } });
+            return;
+          }
+          if (!active()) return;
+          await opened.control('start', controlsFor(ctx, token));
+          const stillStarted = () => active() && storeFor(ctx).load().experience?.enabled === true;
+          if (stillStarted()) await saveCompanionLocation(pi, paths, stillStarted);
+          if (!stillStarted()) return;
+          if (await opened.claimSetup()) pi.sendUserMessage(instructions(), { deliverAs: 'followUp' });
+          else if (ctx.hasUI) {
+            const pendingSetup = (await opened.state()).setup === 'requested';
+            ctx.ui.notify(pendingSetup
+              ? 'Companion resumed. Initial setup was already reserved and will not be resent; continue in this conversation if it was interrupted.'
+              : 'Companion resumed from its saved checkpoint; no setup turn was submitted.', 'info');
           }
           return;
         }
         if (action === 'stop') {
-          const results = await Promise.allSettled([reinforcement.stop(ctx), runControl('stop', ctx)]);
-          const failure = results.find(result => result.status === 'rejected');
-          if (failure?.status === 'rejected') throw failure.reason;
+          if (!hasCheckpoint()) {
+            const results = await Promise.allSettled([reinforcement.stop(ctx), runControl('stop', ctx)]);
+            const failure = results.find(result => result.status === 'rejected');
+            if (failure?.status === 'rejected') throw failure.reason;
+          } else {
+            const opened = await openRuntime(ctx);
+            if (!await ownsRuntime(opened, ctx)) {
+              await closeRuntime();
+              throw Error('Stop Companion in its saved owning session.');
+            }
+            if (!active()) return;
+            await opened.control('stop', controlsFor(ctx, token));
+          }
           return;
         }
         throw new Error('Usage: /companion [start|stop]');
