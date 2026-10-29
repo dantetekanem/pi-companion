@@ -3,18 +3,24 @@
   "version": "0.1.4",
   "private": true,
   "type": "module",
-  "description": "Session-scoped Companion schedules with append-only Markdown updates and reports for Pi.",
+  "description": "A chat-first Companion CLI with recurring checks, Pi conversations and Pi/Claude background harnesses.",
+  "bin": { "pi-companion": "./src/cli/main.mjs" },
   "keywords": ["pi-package"],
   "repository": "https://github.com/dantetekanem/pi-companion",
-  "files": ["src", "README.md"],
+  "files": ["src", "README.md", "docs/upgrade.md", "docs/legacy.md"],
   "pi": { "extensions": ["./src/index.ts"] },
   "peerDependencies": {
     "@earendil-works/pi-ai": "^1.1.0",
-    "@earendil-works/pi-coding-agent": "*",
-    "@earendil-works/pi-tui": "*",
+    "@earendil-works/pi-coding-agent": "0.85.1",
+    "@earendil-works/pi-tui": "0.85.1",
     "typebox": "*"
   },
-  "scripts": { "test": "node --test test/companion.test.mjs test/durable.test.mjs test/experience.test.mjs test/reinforcement.test.mjs" },
+  "scripts": {
+    "pi-companion": "node src/cli/main.mjs",
+    "test": "node --test test/companion.test.mjs test/durable.test.mjs test/experience.test.mjs test/reinforcement.test.mjs",
+    "test:cli": "node --test test/cli-*.test.mjs",
+    "test:migration": "node --test test/migration.test.mjs test/migration-*.test.mjs"
+  },
   "engines": { "node": ">=22.19.0" },
   "dependencies": {
     "@earendil-works/chord": "1.1.0",

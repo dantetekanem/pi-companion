@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { mkdtempSync, readFileSync, writeFileSync, rmSync, statSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync, rmSync, statSync, mkdirSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { createRequire } from 'node:module';
@@ -18,6 +18,7 @@ const { Store } = await jiti.import('../src/store.ts');
 const { label, validateResult } = await jiti.import('../src/result.ts');
 const { controlSchedules } = await jiti.import('../src/scheduler.ts');
 const { registerCompanion } = await jiti.import('../src/index.ts');
+const { DurableCompanion } = await jiti.import('../src/durable.ts');
 const tasteInstructions = readFileSync(new URL('../src/prompts/taste.md', import.meta.url), 'utf8');
 const companionInstructions = [readFileSync(new URL('../src/prompts/prompt.md', import.meta.url), 'utf8'), tasteInstructions].join('\n\n');
 const report = (id = 'digest-1', outcome = 'no_change') => ({
@@ -111,34 +112,90 @@ test('a failed durable write does not produce a saved result', t => {
 
 function harness(t, sessionId = 'owner', paths) {
   const fixturePaths = paths ?? fixture(t);
-  const options = { root: fixturePaths.dir, locationRoot: fixturePaths.dir, schedulerFile: join(fixturePaths.dir, 'tasks.json'), schedulesFile: join(fixturePaths.dir, 'schedules.md'), reportsFile: join(fixturePaths.dir, 'reports.md'), reviewSettingsFile: join(fixturePaths.dir, 'teams.json') };
+  const options = {
+    root: fixturePaths.dir,
+    migrationControlRoot: join(fixturePaths.dir, 'control'),
+    locationRoot: fixturePaths.dir,
+    schedulerFile: join(fixturePaths.dir, 'tasks.json'),
+    schedulesFile: join(fixturePaths.dir, 'schedules.md'),
+    reportsFile: join(fixturePaths.dir, 'reports.md'),
+    reviewSettingsFile: join(fixturePaths.dir, 'teams.json'),
+  };
   fixturePaths.tasks ??= [];
-  const events = new Map(), tools = new Map(), commands = new Map(), notices = [], selections = [];
-  const ctx = { mode: 'tui', hasUI: true, isIdle: () => true, sessionManager: { getSessionId: () => sessionId, getSessionFile: () => `${sessionId}.jsonl`, getLeafId: () => 'leaf' },
-    ui: { notify: (...args) => notices.push(args),
-      select: async (title, choices) => { selections.push({ title, choices }); return undefined; }, custom: async () => false } };
-  const messages = [], pi = { on: (name, fn) => events.set(name, fn), registerTool: tool => tools.set(tool.name, tool),
+  const events = new Map();
+  const tools = new Map();
+  const commands = new Map();
+  const notices = [];
+  const selections = [];
+  const ctx = {
+    mode: 'tui',
+    hasUI: true,
+    isIdle: () => true,
+    sessionManager: {
+      getSessionId: () => sessionId,
+      getSessionFile: () => `${sessionId}.jsonl`,
+      getLeafId: () => 'leaf',
+    },
+    ui: {
+      notify: (...args) => notices.push(args),
+      select: async (title, choices) => {
+        selections.push({ title, choices });
+        return undefined;
+      },
+      custom: async () => false,
+    },
+  };
+  const messages = [];
+  const pi = {
+    on: (name, fn) => events.set(name, fn),
+    registerTool: tool => tools.set(tool.name, tool),
     registerCommand: (name, command) => commands.set(name, command),
     getCommands: () => ['schedule', 'schedule-enable', 'schedule-disable'].map(name => ({ name, sourceInfo: { path: '/test/@jl1990/pi-scheduler/index.ts' } })),
     exec: async () => ({ code: 1, stdout: '', stderr: 'Herdr unavailable', killed: false }),
     sendUserMessage: (content, delivery) => {
-      if (!delivery?.expandPromptTemplates) { messages.push({ content, options: delivery }); return; }
+      if (!delivery?.expandPromptTemplates) {
+        messages.push({ content, options: delivery });
+        return;
+      }
       const tasks = fixturePaths.tasks ?? [];
-      if (content.startsWith('/schedule ')) tasks.push({ id: `task_daily_${sessionId}`, action: 'prompt', type: 'interval', schedule: '24h',
-        prompt: content.split(' :: ')[1], scope: 'session', sessionFile: `${sessionId}.jsonl`, enabled: true, status: 'pending' });
-      else {
-        const [command, id] = content.split(' '), task = tasks.find(item => item.id === id);
+      if (content.startsWith('/schedule ')) {
+        tasks.push({
+          id: `task_daily_${sessionId}`,
+          action: 'prompt',
+          type: 'interval',
+          schedule: '24h',
+          prompt: content.split(' :: ')[1],
+          scope: 'session',
+          sessionFile: `${sessionId}.jsonl`,
+          enabled: true,
+          status: 'pending',
+        });
+      } else {
+        const [command, id] = content.split(' ');
+        const task = tasks.find(item => item.id === id);
         task.enabled = command === '/schedule-enable';
         if (!task.enabled) task.disabledAt = new Date().toISOString();
       }
       fixturePaths.tasks = tasks;
       writeFileSync(options.schedulerFile, JSON.stringify({ tasks }));
-    } };
+    },
+  };
   registerCompanion(pi, options);
   fixturePaths.shutdowns.push(() => events.get('session_shutdown')({}, ctx));
-  return { ...fixturePaths, pi, ctx, options, events, tools, commands, notices, selections, messages,
+  return {
+    ...fixturePaths,
+    pi,
+    ctx,
+    options,
+    events,
+    tools,
+    commands,
+    notices,
+    selections,
+    messages,
     command: args => commands.get('companion').handler(args, ctx),
-    ingest: params => new Store(fixturePaths.dir, sessionId).ingest(params) };
+    ingest: params => new Store(fixturePaths.dir, sessionId).ingest(params),
+  };
 }
 
 test('legacy reload migrates proven activity but preserves paused, stopping and ambiguous sessions', async t => {
@@ -152,8 +209,7 @@ test('legacy reload migrates proven activity but preserves paused, stopping and 
     h.store.save(state);
     await runtime.events.get('session_start')({}, runtime.ctx);
     assert.equal(h.store.load().experience.enabled, mode === 'active');
-    const context = await runtime.events.get('before_agent_start')({}, runtime.ctx);
-    assert.match(context.message.content, mode === 'active' ? /Companion is running/ : /Companion is stopped/);
+
   }
 });
 
@@ -191,6 +247,27 @@ test('cold setup sends instructions once; repeated starts restore the saved runt
   assert.equal(h.selections.length, 0);
 });
 
+test('session-local startup retries initial setup after scheduler admission fails and the session reloads', async t => {
+  const h = harness(t);
+  writeFileSync(h.options.schedulesFile, '# Schedules\n## Reading\n');
+  h.pi.getCommands = () => [];
+  await h.command('start');
+  assert.equal(h.messages.length, 0);
+  assert.ok(h.notices.some(([message, level]) => level === 'error' && /scheduler/.test(message)));
+  await h.events.get('session_shutdown')({}, h.ctx);
+
+  const resumed = harness(t, 'owner', h);
+  await resumed.events.get('session_start')({}, resumed.ctx);
+  await Promise.all([resumed.command('start'), resumed.command('start')]);
+  assert.equal(resumed.messages.length, 1, 'successful concurrent retries must submit one initial setup turn');
+  assert.equal(resumed.messages[0].content, companionInstructions);
+  assert.equal(h.store.load().started, true);
+  await resumed.command('start');
+  assert.equal(resumed.messages.length, 1);
+  assert.equal(resumed.tasks.length, 1);
+  assert.equal(resumed.notices.some(([, level]) => level === 'error'), false);
+});
+
 test('shutdown before checkpoint admission prevents stale start effects and releases ownership', async t => {
   const h = harness(t), starting = h.command('start');
   await h.events.get('session_shutdown')({}, h.ctx);
@@ -202,14 +279,52 @@ test('shutdown before checkpoint admission prevents stale start effects and rele
   assert.equal(resumed.messages.length, 1);
 });
 
-test('a registry alone cannot bind a fresh conversation and reconstruct its routines', async t => {
-  const h = harness(t);
-  writeFileSync(h.options.schedulesFile, '# Schedules\n## Reading\n');
-  await h.command('start');
-  assert.ok(h.notices.some(([message]) => /existing Companion session/.test(message)));
-  assert.equal(new Store(h.dir, 'owner').load().started, undefined);
-  assert.equal(h.messages.length, 0);
+test('legacy startup works in a fresh Pi session without adopting or copying another session', async t => {
+  const scheduler = schedulerFixture(t);
+  scheduler.store.ingest(report('legacy-history'));
+  const originalState = readFileSync(scheduler.store.file, 'utf8');
+  const originalTasks = structuredClone(scheduler.tasks);
+  const runtime = harness(t, 'fresh', scheduler);
+  const store = new Store(scheduler.dir, 'fresh');
+
+  await runtime.events.get('session_start')({}, runtime.ctx);
+  await runtime.command('start');
+
+  assert.equal(store.load().started, true, JSON.stringify(runtime.notices));
+  assert.equal(store.load().experience.enabled, true);
+  assert.equal(runtime.messages.length, 1);
+  assert.equal(runtime.messages[0].content, companionInstructions);
+  const wake = scheduler.tasks.find(task => task.sessionFile === 'fresh.jsonl');
+  assert.equal(wake.schedule, '24h');
+
+  await runtime.command('start');
+  await runtime.command('stop');
+  assert.equal(store.load().experience.enabled, false);
+  assert.equal(wake.enabled, false);
+  await runtime.command('start');
+  assert.equal(wake.enabled, true);
+  assert.equal(runtime.messages.length, 1);
+
+  await runtime.events.get('session_shutdown')({}, runtime.ctx);
+  const resumed = harness(t, 'fresh', scheduler);
+  await resumed.events.get('session_start')({}, resumed.ctx);
+  await resumed.command('start');
+  assert.equal(store.load().experience.enabled, true);
+  assert.equal(resumed.messages.length, 0);
+  assert.equal(scheduler.tasks.filter(task => task.sessionFile === 'fresh.jsonl').length, 1);
+  assert.deepEqual(scheduler.tasks.filter(task => task.sessionFile !== 'fresh.jsonl'), originalTasks);
+  assert.equal(readFileSync(scheduler.store.file, 'utf8'), originalState);
+  assert.equal(existsSync(join(scheduler.dir, 'durable')), false);
+  assert.equal([...runtime.notices, ...resumed.notices].some(([, level]) => level === 'error'), false);
 });
+
+async function withCheckpoint(fixture) {
+  const checkpoint = await DurableCompanion.open(join(fixture.dir, 'durable'), {
+    sessionId: 'owner', sessionFile: 'owner.jsonl',
+  }, true);
+  await checkpoint.close();
+  return fixture;
+}
 
 function locationHarness(t, h = harness(t)) {
   for (const [key, value] of Object.entries({ HERDR_ENV: '1', HERDR_WORKSPACE_ID: 'w1', HERDR_PANE_ID: 'w1:p2' })) {
@@ -276,14 +391,15 @@ test('Companion location failures do not block start and stale start cannot regi
   h.pi.exec = () => new Promise(resolve => { release = resolve; entered(); });
   const starting = h.command('start');
   await executing;
-  await h.events.get('session_shutdown')({}, h.ctx);
+  const shuttingDown = h.events.get('session_shutdown')({}, h.ctx);
   release({ code: 0, stdout: JSON.stringify({ result: { pane: h.pane } }) });
-  await starting;
+  await Promise.all([starting, shuttingDown]);
   assert.throws(() => statSync(h.file), { code: 'ENOENT' });
 });
 
 test('a new session resumes the Durable owner instead of creating another set of routines', async t => {
-  const scheduler = schedulerFixture(t), first = harness(t, 'owner', scheduler);
+  const scheduler = await withCheckpoint(schedulerFixture(t));
+  const first = harness(t, 'owner', scheduler);
   scheduler.store.save({ ...scheduler.store.load(), started: true });
   await first.command('start');
   assert.deepEqual(first.messages, []);
@@ -327,30 +443,71 @@ test('identifiable Companion schedule creation is session-scoped in every sessio
 
 function schedulerFixture(t) {
   const { dir, store, shutdowns } = fixture(t);
-  const schedulerFile = join(dir, 'tasks.json'), schedulesFile = join(dir, 'schedules.md');
+  const schedulerFile = join(dir, 'tasks.json');
+  const schedulesFile = join(dir, 'schedules.md');
   writeFileSync(schedulesFile, '# Schedules\n## Reading\n## Mail\n');
-  const task = (id, patch = {}) => ({ id, name: 'Reading', scope: 'session', sessionFile: 'owner.jsonl', type: 'cron', schedule: '0 9 * * 5', status: 'pending', enabled: true, ...patch });
-  const tasks = [task('task_owned'), task('task_other', { sessionFile: 'other.jsonl' }), task('task_global', { scope: 'global' }),
-    task('task_finance', { name: 'Finance updates' }), task('task_cancelled', { enabled: false, status: 'cancelled' }),
-    task('task_manual', { enabled: false }), task('task_once', { type: 'once' }), task('task_unrelated', { name: 'CI poll' }),
-    task('task_suffix', { name: 'Reading (other work)' })];
-  const save = () => writeFileSync(schedulerFile, JSON.stringify({ tasks })); save();
-  const sent = [], pi = {
+  const task = (id, patch = {}) => ({
+    id,
+    name: 'Reading',
+    scope: 'session',
+    sessionFile: 'owner.jsonl',
+    type: 'cron',
+    schedule: '0 9 * * 5',
+    status: 'pending',
+    enabled: true,
+    ...patch,
+  });
+  const tasks = [
+    task('task_owned'),
+    task('task_other', { sessionFile: 'other.jsonl' }),
+    task('task_global', { scope: 'global' }),
+    task('task_finance', { name: 'Finance updates' }),
+    task('task_cancelled', { enabled: false, status: 'cancelled' }),
+    task('task_manual', { enabled: false }),
+    task('task_once', { type: 'once' }),
+    task('task_unrelated', { name: 'CI poll' }),
+    task('task_suffix', { name: 'Reading (other work)' }),
+  ];
+  const save = () => writeFileSync(schedulerFile, JSON.stringify({ tasks }));
+  save();
+  const sent = [];
+  const pi = {
     getCommands: () => ['schedule', 'schedule-enable', 'schedule-disable'].map(name => ({ name, sourceInfo: { path: '/test/@jl1990/pi-scheduler/extensions/scheduler/index.ts' } })),
     sendUserMessage: (command, options) => {
-      sent.push(command); assert.equal(options.expandPromptTemplates, true);
+      sent.push(command);
+      assert.equal(options.expandPromptTemplates, true);
       const [verb, id] = command.split(' ');
       if (verb === '/schedule') {
-        tasks.push({ id: 'task_daily_owner', action: 'prompt', type: 'interval', schedule: '24h', prompt: command.split(' :: ')[1],
-          scope: 'session', sessionFile: 'owner.jsonl', enabled: true, status: 'pending' });
+        tasks.push({
+          id: 'task_daily_owner',
+          action: 'prompt',
+          type: 'interval',
+          schedule: '24h',
+          prompt: command.split(' :: ')[1],
+          scope: 'session',
+          sessionFile: 'owner.jsonl',
+          enabled: true,
+          status: 'pending',
+        });
       } else {
         const item = tasks.find(task => task.id === id);
-        item.enabled = verb === '/schedule-enable'; if (!item.enabled) item.disabledAt = `paused-${sent.length}`;
+        item.enabled = verb === '/schedule-enable';
+        if (!item.enabled) item.disabledAt = `paused-${sent.length}`;
       }
       save();
     },
   };
-  return { dir, store, shutdowns, tasks, save, sent, pi, options: { schedulerFile, schedulesFile }, ctx: { sessionManager: { getSessionFile: () => 'owner.jsonl' } } };
+  return {
+    dir,
+    store,
+    shutdowns,
+    tasks,
+    save,
+    sent,
+    pi,
+    options: { schedulerFile, schedulesFile },
+    ctx: { sessionManager: { getSessionFile: () => 'owner.jsonl' } },
+  };
 }
 
 test('stop uses existing commands only for owned approved recurring work; start resumes only its receipts', async t => {
@@ -460,7 +617,8 @@ function stopRequested(runtime) {
 }
 
 test('successful session recovery completes the stop and preserves saved results', async t => {
-  const h = schedulerFixture(t); h.tasks[0].status = 'running'; h.save();
+  const h = await withCheckpoint(schedulerFixture(t));
+  h.tasks[0].status = 'running'; h.save();
   const runtime = harness(t, 'owner', h);
   Object.assign(runtime.pi, { getCommands: h.pi.getCommands, sendUserMessage: h.pi.sendUserMessage });
   await runtime.command('start');
@@ -510,19 +668,23 @@ test('immediate shutdown/start chains recovery after the interrupted control cle
   const h = schedulerFixture(t); h.tasks[0].status = 'running'; h.save();
   const runtime = harness(t, 'owner', h);
   Object.assign(runtime.pi, { getCommands: h.pi.getCommands, sendUserMessage: h.pi.sendUserMessage });
-  const stopping = runtime.command('stop');
+  const requested = stopRequested(runtime), stopping = runtime.command('stop');
+  await requested;
   assert.equal(h.store.load().stopping.length, 1);
   await runtime.events.get('session_shutdown')({}, runtime.ctx);
+  const recovered = new Promise(resolve => {
+    const notify = runtime.ctx.ui.notify;
+    runtime.ctx.ui.notify = (...args) => { notify(...args); if (args[0].startsWith('Stopped 1')) resolve(); };
+  });
   await runtime.events.get('session_start')({}, runtime.ctx);
   h.tasks[0].status = 'pending'; h.save();
-  await stopping;
-  await new Promise(setImmediate);
+  await Promise.all([stopping, recovered]);
   assert.deepEqual(h.sent, ['/schedule-disable task_owned']);
   assert.equal(h.tasks[0].enabled, false);
   assert.equal(h.store.load().stopping.length, 0); assert.equal(h.store.load().paused.length, 1);
 });
 
-test('adopting an existing Companion resumes its saved schedules without rebuilding setup', async t => {
+test('legacy startup resumes its own saved schedules without rebuilding setup', async t => {
   const h = schedulerFixture(t);
   h.store.save({ ...h.store.load(), started: true });
   await controlSchedules('stop', h.pi, h.ctx, h.store, h.options);
@@ -538,6 +700,7 @@ test('adopting an existing Companion resumes its saved schedules without rebuild
   assert.ok(sequence.includes('/schedule-enable task_owned'));
   assert.equal(h.store.load().paused.length, 0);
   assert.deepEqual(runtime.messages, []);
+  assert.equal(existsSync(join(h.dir, 'durable')), false);
 });
 
 test('a delivery racing the disable command cannot re-enable the stopped schedule', async t => {

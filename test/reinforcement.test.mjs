@@ -18,22 +18,52 @@ const emptyReview = () => ({ assessments: [], lessons: [], decisions: [], answer
 const response = data => ({ stopReason: 'stop', content: [{ type: 'text', text: JSON.stringify(data) }], usage: { cost: { total: 0.02 } } });
 function fixture(t) {
   const dir = mkdtempSync(join(tmpdir(), 'companion-reinforcement-'));
-  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const shutdowns = [];
+  t.after(async () => {
+    for (const shutdown of shutdowns) await shutdown();
+    rmSync(dir, { recursive: true, force: true });
+  });
   const settings = join(dir, 'teams.json');
-  writeFileSync(settings, JSON.stringify({ favoriteModels: { 'read-critical': { model: 'openai-codex/strong', thinking: 'max' } } }));
-  const model = { id: 'strong', name: 'Fixture', provider: 'openai-codex', api: 'openai-codex-responses', reasoning: true, thinkingLevelMap: { max: 'xhigh' } };
+  writeFileSync(settings, JSON.stringify({
+    favoriteModels: {
+      'read-critical': { model: 'openai-codex/strong', thinking: 'max' },
+    },
+  }));
+  const model = {
+    id: 'strong',
+    name: 'Fixture',
+    provider: 'openai-codex',
+    api: 'openai-codex-responses',
+    reasoning: true,
+    thinkingLevelMap: { max: 'xhigh' },
+  };
   const calls = [];
   let result = response(emptyReview());
-  const ctx = { model: { provider: 'openai-codex', id: 'conversation' }, modelRegistry: {
-    find: (provider, id) => provider === model.provider && id === model.id ? model : undefined,
-    complete: async (...args) => { calls.push(args); return result; },
-  } };
+  const ctx = {
+    model: { provider: 'openai-codex', id: 'conversation' },
+    modelRegistry: {
+      find: (provider, id) => provider === model.provider && id === model.id ? model : undefined,
+      complete: async (...args) => {
+        calls.push(args);
+        return result;
+      },
+    },
+  };
   const store = new ExperienceStore(dir, 'owner');
   store.update(state => {
     state.enabled = true;
     recordEvidence(state, { id: 'answer', kind: 'user', text: 'Friday afternoons are useful.', provider: 'openai-codex' });
   });
-  return { dir, settings, model, calls, ctx, store, setResult(value) { result = value; } };
+  return {
+    dir,
+    settings,
+    model,
+    calls,
+    ctx,
+    store,
+    shutdowns,
+    setResult(value) { result = value; },
+  };
 }
 
 test('daily reflection actually calls the configured critical binding and curates evidence for the next decision', async t => {
@@ -106,25 +136,60 @@ test('stop rejects a late review and an abort settles even if the provider does 
 async function runtimeFixture(t) {
   const h = fixture(t);
   const { registerReinforcement } = await jiti.import('../src/reinforcement.ts');
-  const tasks = [], messages = [], events = new Map(), tools = new Map(), notices = [];
-  const paths = { root: h.dir, schedulerFile: join(h.dir, 'scheduler.json'), schedulesFile: join(h.dir, 'schedules.md'),
-    reportsFile: join(h.dir, 'reports.md'), reviewSettingsFile: h.settings };
+  const tasks = [];
+  const messages = [];
+  const events = new Map();
+  const tools = new Map();
+  const notices = [];
+  const paths = {
+    root: h.dir,
+    migrationControlRoot: join(h.dir, 'control'),
+    schedulerFile: join(h.dir, 'scheduler.json'),
+    schedulesFile: join(h.dir, 'schedules.md'),
+    reportsFile: join(h.dir, 'reports.md'),
+    reviewSettingsFile: h.settings,
+  };
   const save = () => writeFileSync(paths.schedulerFile, JSON.stringify({ tasks }));
   writeFileSync(paths.schedulesFile, '# Tasks\n## Reading\n');
   save();
-  let idle = true, count = 0;
-  const ctx = { ...h.ctx, cwd: h.dir, hasUI: true, isIdle: () => idle,
-    sessionManager: { getSessionId: () => 'owner', getSessionFile: () => 'owner.jsonl', getLeafId: () => 'leaf-1' },
-    ui: { notify: (...args) => notices.push(args) } };
+  let idle = true;
+  let count = 0;
+  const ctx = {
+    ...h.ctx,
+    cwd: h.dir,
+    hasUI: true,
+    isIdle: () => idle,
+    sessionManager: {
+      getSessionId: () => 'owner',
+      getSessionFile: () => 'owner.jsonl',
+      getLeafId: () => 'leaf-1',
+    },
+    ui: { notify: (...args) => notices.push(args) },
+  };
   const pi = {
-    on: (name, fn) => events.set(name, fn), registerTool: tool => tools.set(tool.name, tool), registerCommand() {},
+    on: (name, fn) => events.set(name, fn),
+    registerTool: tool => tools.set(tool.name, tool),
+    registerCommand() {},
     getCommands: () => ['schedule', 'schedule-enable', 'schedule-disable'].map(name => ({ name, sourceInfo: { path: '/test/@jl1990/pi-scheduler/index.ts' } })),
     sendUserMessage(text, options) {
-      if (!options?.expandPromptTemplates) { messages.push(text); return; }
+      if (!options?.expandPromptTemplates) {
+        messages.push(text);
+        return;
+      }
       const [command, ...args] = text.split(' ');
-      if (command === '/schedule') tasks.push({ id: `task_${++count}`, action: 'prompt', type: 'interval', schedule: args[2],
-        prompt: text.split(' :: ')[1], scope: 'session', sessionFile: 'owner.jsonl', enabled: true, status: 'pending' });
-      else {
+      if (command === '/schedule') {
+        tasks.push({
+          id: `task_${++count}`,
+          action: 'prompt',
+          type: 'interval',
+          schedule: args[2],
+          prompt: text.split(' :: ')[1],
+          scope: 'session',
+          sessionFile: 'owner.jsonl',
+          enabled: true,
+          status: 'pending',
+        });
+      } else {
         const task = tasks.find(item => item.id === args[0]);
         task.enabled = command === '/schedule-enable';
         if (!task.enabled) task.disabledAt = `disabled-${++count}`;
@@ -133,8 +198,27 @@ async function runtimeFixture(t) {
     },
   };
   const runtime = registerReinforcement(pi, paths);
+  h.shutdowns.push(async () => {
+    runtime.shutdown();
+    await runtime.drain();
+    await events.get('session_shutdown')?.({}, ctx);
+  });
   const fire = task => `[Scheduled task ${task.id} fired]\nName: ${task.name ?? '(unnamed)'}\nAction: prompt\nType: ${task.type}\nSchedule: ${task.schedule}\nScheduled for: ${new Date(Date.now() - 1000).toISOString()}\n${task.prompt}`;
-  return { ...h, pi, paths, tasks, messages, events, tools, ctx, runtime, notices, save, fire, setIdle(value) { idle = value; } };
+  return {
+    ...h,
+    pi,
+    paths,
+    tasks,
+    messages,
+    events,
+    tools,
+    ctx,
+    runtime,
+    notices,
+    save,
+    fire,
+    setIdle(value) { idle = value; },
+  };
 }
 
 test('start creates one daily wake, busy delivery waits for settlement, and learned context reaches the actor', async t => {
@@ -159,6 +243,46 @@ test('start creates one daily wake, busy delivery waits for settlement, and lear
   await h.events.get('input')(wake, h.ctx);
   assert.equal(h.calls.length, 1);
   assert.equal(await h.events.get('input')({ source: 'extension', text: '[Scheduled task manual fired]\nNotes about companion-daily:example' }, h.ctx), undefined);
+});
+
+test('a daily review can finish after two minutes and publish its learned context', async t => {
+  const h = await runtimeFixture(t);
+  await h.runtime.start(h.ctx);
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const completion = Promise.withResolvers();
+  let signal;
+  h.ctx.modelRegistry.complete = (_model, _context, options) => {
+    signal = options.signal;
+    return completion.promise;
+  };
+  const pending = h.events.get('input')({ source: 'extension', text: h.fire(h.tasks[0]) }, h.ctx);
+  assert.ok(signal);
+  t.mock.timers.tick(120001);
+  completion.resolve(response({ ...emptyReview(), lessons: [{ id: 'patient', action: 'upsert', text: 'Keep useful Friday planning.', confidence: 'supported', evidenceIds: ['answer'] }] }));
+  await pending;
+  assert.equal(h.store.load().reviews[0].status, 'completed');
+  assert.match(h.messages.at(-1), /Keep useful Friday planning/);
+  assert.equal(h.notices.length, 0);
+});
+
+test('stopping a pending daily review propagates cancellation and rejects late learning', async t => {
+  const h = await runtimeFixture(t);
+  await h.runtime.start(h.ctx);
+  const completion = Promise.withResolvers();
+  let signal;
+  h.ctx.modelRegistry.complete = (_model, _context, options) => {
+    signal = options.signal;
+    return completion.promise;
+  };
+  const pending = h.events.get('input')({ source: 'extension', text: h.fire(h.tasks[0]) }, h.ctx);
+  await h.runtime.stop(h.ctx);
+  await pending;
+  assert.equal(signal.aborted, true);
+  assert.equal(h.store.load().reviews[0].status, 'failed');
+  completion.resolve(response({ ...emptyReview(), lessons: [{ id: 'late', action: 'upsert', text: 'Late learning.', confidence: 'supported', evidenceIds: ['answer'] }] }));
+  await new Promise(setImmediate);
+  assert.equal(h.store.load().lessons.length, 0);
+  assert.equal(h.messages.length, 0);
 });
 
 test('the agent can publish a question and a normal user answer is captured without manual feedback commands', async t => {

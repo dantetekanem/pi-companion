@@ -1,61 +1,109 @@
-# pi-companion
+# Pi Companion
 
-A [Pi](https://pi.dev) extension for assistance that continues across days. Companion discovers useful recurring work, maintains its schedules, observes outcomes and adjusts what it does. You can keep talking with it; you do not need to manage a learning workflow.
+A terminal workspace for recurring checks and a persistent Pi conversation. Reports stay on screen, the composer stays available while checks run, and schedules are ordinary files. Background checks can use Pi or Claude. The main conversation uses Pi; Pi Durable stores dispatch and ownership receipts separately from its transcript.
 
-## Start and stop
+This checkout contains the v2 implementation at package version **0.1.4**. It has not been released as a new version. Existing data is never migrated by startup, listing or plain output. Use the [explicit one-time upgrade workflow](docs/upgrade.md) when ready.
 
-- `/companion` or `/companion start`: begin or resume the saved Companion conversation and its daily reflection.
-- `/companion stop`: stop learning and pause the owning session's Companion schedules, preserving history and unanswered questions. Run it in that session.
+## Start
 
-Returning starts use Pi Durable checkpoints without submitting a model setup turn. They do not scan notes, generate resume documents, or recreate routines. A start from a different Pi conversation switches to the saved owner; if another process already owns Companion, it reports that rather than taking over. Other sessions' schedules remain untouched.
+Requires Node 22.19 or newer, Pi credentials, and the package dependencies. The SDK/TUI integration targets **0.85.1**, with Pi Durable **1.1.0**. A newer Pi host is not evidence that its SDK is compatible. Claude jobs also require the `claude` executable; Pi jobs require `pi` on PATH.
 
-Recurring work requires Pi running in the owning session. Start resumes only schedules Companion itself paused, not tasks cancelled, edited or stopped outside Companion. On first adoption after upgrading, run `/companion start` in the existing Companion conversation. Its saved state and schedules are reused without reading private histories. If a registry exists but the current conversation has no saved setup or active approved routines, adoption fails visibly instead of rebuilding it elsewhere.
-
-A daily-reflection stop failure does not prevent pausing owned routines. Failures and scheduler receipts remain saved and visible after restart. Once the scheduler issue is corrected, run `/companion stop` again to retry; a failed control is not reported as completed.
-
-A genuinely new Companion sends its setup instructions once. The dispatch is reserved before sending; a crash in that gap does not cause an automatic retry. If initial setup was interrupted, continue in the saved conversation. An unavailable or deleted owning session is an error, not permission to replace it.
-
-## How it learns
-
-The existing agent does the work. It defines tasks in `~/.companion-schedules.md`, using established source and action permissions, and maintains context in `~/.companion-notes/`. It can create, revise, consolidate or retire its checks without asking you to administer each change. Broader access, external sends, installations and operational mutations still need their established authorization.
-
-The extension records owned scheduler receipts, deliveries and normal user messages while Companion is running. The agent uses the internal `companion_record` tool to record observations, actual run outcomes, publications and answers. IDs are internal; you never need to supply task IDs or ratings. A delivery is not completion, publishing is not proof of reading, and no reply means uncertain usefulness, not dislike.
-
-Every 24 hours, one session-owned scheduler wake runs an isolated reflection with the existing Teams global `favoriteModels.read-critical` binding. It uses the exact configured model and effort, without changing the conversation model. That slot is not inherently a stronger model: it can select the same model with more reasoning effort. The current adapter supports the Codex responses API and requires the same provider as the conversation; missing, unsupported or cross-provider routing fails visibly rather than silently falling back.
-
-Reflection reviews bounded evidence, retains incremental lessons, links clear answers to questions and proposes a few changes with expected benefits and success signals. The existing agent receives that context, checks current state and permissions, applies useful decisions through the normal tools and records receipts. Later reviews compare outcomes with the intended benefit. This is harness-level learning, not model-weight training or a measured claim that recommendations improve.
-
-## Questions and reports
-
-Companion can interview you whenever it needs context. It can also leave questions in `~/.companion-reports-updates.md`, the same append-only Markdown feed used for important findings. Answer normally in the Companion conversation; those answers inform later decisions. Unanswered questions remain pending without repeated nudges. Routine no-news runs stay quiet. Tail the file in your existing tracking pane; Companion does not create another feed or unread counter.
-
-## Runtime boundaries
-
-Pi Durable **1.1.0** (experimental) owns model-free start/stop tasks in `companion/durable/companion.sqlite` under Pi's agent directory. A typed document stores the owner, setup-dispatch reservation, and control-task identity. Tasks checkpoint between daily-reflection control and routine control; after interruption, the remaining phase reconciles existing scheduler receipts before acting. Quit, reload, and session replacement close the Harness and release its process lock. After an unclean process death, a stale lock may take up to five minutes to expire; never delete a live owner's lock.
-
-This integration does not move ordinary model turns, tool calls, scheduled checks, or reflection into Durable. Pi and its installed extensions still execute them. Durable has no configured model providers here, and no generic bridge from Pi tool metadata to executable tools. SQLite uses WAL with `synchronous=NORMAL`: checkpoints survive process crashes, but the latest commits may be lost after power failure. See [Pi Durable's storage contract](https://github.com/earendil-works/pi/blob/v1.1.0/packages/durable/README.md#storage).
-
-Experience, question links, lesson revisions, decisions and review receipts live in the existing session storage under Pi's agent directory (`companion/<session-hash>.json`). Older evidence remains on disk. Context excludes evidence and derived memory from another provider. The agent should record only material permitted for that provider; the extension does not crawl accounts, archives or notes for the reflector.
-
-The model binding is a small read-only schema integration with Teams' documented global `~/.pi/agent/pi-extended-teams/settings.json`; project settings cannot override favorites. No extra policy file or command is required. Pi's model registry handles authentication. Reviews omit tools, reserve at most one attempt per UTC day, cap supplied context and accepted output at 32 KB each, and have a two-minute deadline. The installed Codex adapter does not enforce a token-generation cap; output validation is not a spending limit. Stop, model changes and session shutdown/navigation reject stale results. Failed or interrupted attempts are retained rather than automatically retried that day.
-
-Scheduler commands own timers and persistence. Companion validates its opaque-token wake and records model completion separately from scheduler delivery. Busy-session wakes wait for settlement. Review effectiveness and real provider behavior require live use; isolated tests exercise the installed scheduler transport and mock the paid model boundary.
-
-The research informs three choices:
-
-- [Reflexion, §3](https://arxiv.org/html/2303.11366v4): evaluate a trajectory, turn feedback into a verbal lesson, and condition later actions on that memory. Companion keeps delivery, outcomes and reflection separate.
-- [ACE, §3 and §4.4](https://arxiv.org/html/2510.04618v2): merge itemized context updates instead of repeatedly rewriting the whole memory. ACE also reports degradation with unreliable feedback; citations and tentative lessons reduce that risk but cannot prove a model's interpretation correct.
-- [Pare, Appendix B](https://arxiv.org/html/2604.00842v1): distinguish rejection from a user gathering context before deciding. Companion therefore does not treat silence as rejection or a task firing as success.
-
-These papers motivate the approach; they do not establish that it works for a particular user. Companion does not reproduce their benchmarks or claim their measured gains.
-
-## Installation
+Once the command is installed on PATH, launch it from any directory:
 
 ```sh
-pi install git:github.com/dantetekanem/pi-companion
-pi install git:github.com/jl1990/pi-scheduler
+pi-companion
 ```
 
-Requires Node 22.19 or newer. The package includes Pi Durable and its runtime dependencies; it does not install or start a daemon. Run `/reload`, then `/companion` in the existing Companion conversation when upgrading. Automatic reflection reuses an existing Teams `read-critical` favorite. The extension never installs integrations or changes that mapping itself.
+First launch creates a private `~/.companion` workspace with `config.json` and empty `schedules/{daily,weekly,monthly}` folders, then connects the Pi runtime. No setup command or path flag is needed. Initialization does not ask an agent to configure anything, enable a check, or submit a model turn. Later launches reuse the workspace. An incomplete upgrade still blocks startup.
 
-See the [agent instructions](src/prompts/prompt.md), [daily reflection contract](src/prompts/reflection.md) and [taste guidance](src/prompts/taste.md).
+The existing Pi extension and `/companion` remain independent. A fresh CLI workspace does not import old data, disable old schedules or fence the extension. Migration requires the explicit upgrade workflow. Finite status/list commands never initialize a workspace or start work.
+
+Edit `config.json` to select the main Pi model/effort and display the preferred background binding. Each schedule has its own explicit binding; changing the background preference does not rewrite schedules. Pi models use `provider/model`; `null` permits the harness's configured default. Keep the generated initialization timestamp unchanged because it defines the accounting and scheduling boundary.
+
+The main Pi session uses ordinary project resources and tools, but extension discovery is disabled to avoid starting another scheduler or Companion owner. The CLI does not expose all Pi TUI slash commands or extension UI. It reopens the saved main identity; `/reset` starts a fresh persisted identity while retaining the previous transcript. It never silently replaces a missing adopted session.
+
+## Schedule files
+
+Put a Markdown file in the appropriate recurrence folder. [The short setup guide](src/prompts/schedule-setup.md) is also copied to `schedules/README.md` by initialization.
+
+```markdown
+---
+{
+  "id": "morning-recap",
+  "title": "Morning recap",
+  "at": "09:00",
+  "timezone": "America/Sao_Paulo",
+  "enabled": false,
+  "harness": "pi",
+  "model": "provider/model",
+  "effort": "medium",
+  "cwd": "/absolute/project/path",
+  "context": ["notes/current.md"]
+}
+---
+Check the approved notes for changes worth acting on. Cite the evidence.
+```
+
+For multiple checks per day, use `"at": ["09:00", "12:00", "18:00"]` in the same file (1 to 48 unique times). This remains one schedule. After downtime, only the latest due time today is eligible. An authorized agent can edit these settings directly; no scheduler development or separate setup step is required. Paused routines stay paused unless enabling them is requested.
+
+For an hourly check between 08:00 and 17:00, replace `at` with:
+```json
+"window": { "start": "08:00", "end": "17:00", "everyMinutes": 60 }
+```
+This is one schedule with ten checks, not ten files. The interval starts at `start`; `end` is included only if it lands on that interval. Both times use the schedule's timezone on the same day; overnight windows are rejected. `everyMinutes` is an integer from 1 to 1440, with at most 48 checks per day. Use either `at` or `window`, never both. After downtime, only the latest due check inside the window is eligible; nothing starts after its end minute.
+
+Choose real paths and an available model, then enable the file. Weekly files also need `weekday` (0 is Sunday); monthly files need `day` (1 to 31). Missing monthly dates and nonexistent daylight-saving times are skipped. Repeated local times run once. Native calendar schedules can run later on the same local date but never catch up previous dates or occurrences before initialization.
+
+`pi-companion schedules` reports malformed files and duplicate IDs. The runner reloads definitions before admission and dispatch. Context includes only named regular files within the real working directory, a bounded previous outcome and the schedule instructions. A file is limited to 32 KiB and the complete context to 64 KiB. These restrictions are not an OS sandbox: permitted harness tools can read other accessible files. Do not use a schedule as an isolation boundary for hostile code or secrets.
+
+## Terminal runtime and background process
+
+With a TTY, `pi-companion` opens the running harness with reports and a message input in the terminal. It paints a saved local view before connecting Pi. Chat opens with the input ready. The header shows the main binding, effort, schedule count, estimated spend and context usage. Schedules shows local times such as `09:00 ET`, rounded next-run estimates, and live background jobs with their harness/model/effort, directory, start time and elapsed time. Its running count is live only while connected; saved receipts are not treated as running. The footer names the next check. Reports show relative age and fixed local date/time with a timezone, including in the full-width Markdown reader. Imported timestamps stay unchanged; missing or invalid times are omitted.
+
+- Type a message and press Enter. In Chat, Left/Right cycles Chat, Reports and Schedules when the draft is empty; with draft text, they move the editor cursor. In Reports or Schedules, Left/Right continues cycling views.
+- Pi's editor supports Ctrl+A/E, Alt+Left/Right, Ctrl+W/U/K, Ctrl+Y, Ctrl+- undo, Ctrl+J or Shift+Enter for a new line, and Up for prompt history. Namespaced `tui.editor.*`, `tui.input.*` and `tui.select.*` bindings load from Pi's `keybindings.json`; application actions and legacy binding aliases are not imported.
+- `/clear` hides the current visible chat across restarts without deleting history or resetting model context. `/reset` starts a fresh main context without a model turn. It keeps the previous transcript and cumulative usage, and cancels only main work and queued steering; background work and schedules continue. Unknown commands stay local instead of becoming model prompts.
+- Agent questions can show selectable answers: Up/Down chooses, Enter answers, Escape cancels. Your draft stays intact. Headless mode returns unavailable instead of waiting for an answer. The selected answer is returned to the same tool call, not sent as a second turn.
+- User and assistant headings have different colors. Empty assistant entries are hidden; the footer shows Thinking while the main turn runs.
+- In Reports, arrow keys select; Enter opens one; Escape returns to the list.
+- Page Up/Down or the mouse wheel scroll the reading area; Chat starts at the latest message. Scrolling over the composer leaves its text alone.
+- Escape returns from report detail to the list, or from a tab to Chat, preserving the draft.
+- Invalid schedules appear in Schedules; scroll to read their errors.
+- Ctrl+C quits.
+
+Ask the main agent to run a configured check now. It can list native schedules and trigger one exact ID with the existing instructions and binding, even while recurrence is paused. This does not enable the schedule or change its timing. The tool returns an admission receipt; the result appears in Reports when the check finishes, including when nothing changed.
+
+An accepted message is not a completed model turn. Rejected sends retain the draft; accepted or interrupted work is never automatically retried. Invalid model reports remain incomplete, and ordinary calendar no-change checks stay quiet. Reports use private receipt IDs rather than visible tracking comments.
+
+`pi-companion run` runs without a TUI in the current process. An external supervisor may manage it; Companion does not install a daemon, detach itself or configure a service. SIGINT/SIGTERM stop owned work and release the owner lock. Only one dashboard, headless runner or review submission may own a home at a time. After an unclean exit, a stale lock can take up to five minutes to expire. Never remove a live owner's lock.
+
+`pi-companion status --plain`, `pi-companion schedules`, and non-TTY status are finite local reads. They neither start providers nor run schedules. Saved status is labeled as a snapshot, not a liveness check. `pi-companion history` prints imported provenance and local archive paths.
+
+## Costs, context and recovery
+
+`runtime/companion.sqlite` stores Durable dispatch receipts; Pi owns the conversation files. An unfinished dispatch is marked interrupted on reopen, not replayed. SQLite checkpoints protect against process crashes, not every power failure. See [Durable's storage contract](https://github.com/earendil-works/pi/blob/v1.1.0/packages/durable/README.md#storage).
+
+The header shows SDK-estimated context tokens/limit (for example, `52.6k/272k`), a rounded whole percentage, auto-compaction setting and completed compactions on this conversation branch. Inapplicable metadata is omitted, including tokens immediately after compaction until new provider usage arrives. Pi retains its configured automatic compaction; Companion does not change that setting. The harness handles compaction automatically; the footer shows `Compacting…` while it runs. Closing prevents late submission but may wait for pending authentication to settle.
+
+`runtime/usage.json` tracks per-session cumulative cost deltas, exact baselines and receipt IDs. Imported historical estimates remain separate. New Pi/Claude checks, conversation turns and migration repair attempts are included from initialization. Missing or conflicting observations retain specific receipt reasons. Amounts are client estimates, not invoices or subscription charges; receipt reasons and pending work are displayed. Companion imposes no automatic job execution timeout; use `k` to cancel scheduled work in the dashboard. Headless runs and pattern submissions accept SIGINT/SIGTERM cancellation. Legacy daily reviews can be cancelled with `/companion stop`; migration repairs have no dashboard `k` control. Provider limits and output bounds still apply and are not spending caps.
+
+Pi background checks use RPC and verify the returned model/thinking binding before submitting the prompt. Claude uses structured print output, an exact session ID and restrictive CLI settings. The installed Claude 2.1.311 help and synthetic process protocol were checked; live provider behavior, effective Claude effort and newer CLI compatibility still need operational verification. Neither harness is an OS sandbox.
+
+Imported daily reflection preserves the original same-provider review binding, records one attempt per UTC day and produces proposals without enabling schedules. New direct messages and run outcomes retain provider attribution. Silence and delivery are not feedback. Historical archives are never automatically injected into a model.
+
+## Find repeated work
+
+The optional [session-pattern review guide](src/prompts/session-patterns-setup.md) describes the consent and selection format. Select exact Pi/Claude JSONL files, dates, exclusions and destination in a local JSON file:
+
+```sh
+pi-companion patterns-preview --selection /absolute/selection.json
+pi-companion patterns-submit --preview HASH --confirm HASH
+```
+
+Preview is local. Submission requires the exact reviewed hash, unchanged source pins and an idle home. It sends bounded user-role excerpts and tool names with tools disabled, then saves a report of daily/weekly/monthly proposals. It does not discover private histories, assume unused workflows, or create schedules. Read the linked guide before submitting.
+
+## Legacy extension and verification
+
+The package still registers `src/index.ts` for existing `/companion` users. Its commands, feed and learning behavior are documented [separately](docs/legacy.md). The v2 upgrade preserves every selected origin and owned schedule, including irregular legacy actions, using pinned scheduler 0.5.1/Croner 10.0.1 helpers. Compatibility routines retain their explicit stops and saved conversation bindings; uncertain attempts require reconciliation.
+
+Tests use temporary roots, real Durable/SessionManager and fake provider boundaries. Migration compatibility tests require an existing scheduler installation; they skip those cases when `COMPANION_TEST_SCHEDULER` is absent. Set it to the absolute package directory for complete compatibility evidence. No test needs private histories, live scheduled commands or paid provider calls. Packaging, tests and local development do not authorize a real migration or release.

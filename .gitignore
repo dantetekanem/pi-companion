@@ -6,8 +6,14 @@
 !/test/
 /src/*
 !/src/*.ts
+!/src/*.mjs
 !/src/prompts/
+!/src/cli/
+!/docs/
+/docs/*
+!/docs/*.md
 /src/prompts/*
 !/src/prompts/*.md
 /test/*
 !/test/*.mjs
+!/test/helpers/
