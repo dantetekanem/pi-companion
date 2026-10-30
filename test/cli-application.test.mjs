@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, readdirSync, statSync, realpathSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync, readFileSync, readdirSync, statSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { initialize, atomicJson } from '../src/cli/config.mjs';
@@ -476,6 +476,38 @@ test('scheduled reports talk back in chat only for critical or useful triage lin
     ]);
     assert.ok(view.reports.some(report => report.id === 'quiet'));
     assert.deepEqual(app.runtime.messages(), contextMessagesBefore);
+  } finally {
+    await app.close();
+  }
+});
+
+test('a blocked check talks back in chat and says when a repeat pauses it', async t => {
+  const h = fixture(t);
+  mkdirSync(join(h.root, 'schedules/daily'), { recursive: true });
+  writeFileSync(join(h.root, 'schedules/daily/mail.md'), `---\n${JSON.stringify({
+    id: 'mail', title: 'Mail', at: '23:00', timezone: 'UTC', enabled: true,
+    harness: 'pi', model: 'fixture/check', effort: 'medium', cwd: h.root, context: [],
+  })}\n---\nCheck mail.\n`);
+  const runHarness = async () => { throw Error('Unexpected provider call in synthetic hold test.'); };
+  const app = await h.openApp({ runHarness, now: () => new Date('2026-01-02T12:00:00Z') });
+  const blocked = (id, finishedAt) => backgroundRun(id, {
+    title: 'Mail', scheduleId: 'mail', finishedAt,
+    result: { status: 'completed', text: 'Blocked: Gmail tools are unavailable.\n\nDetails.' },
+  });
+  const notices = view => view.messages.filter(message => message.role === 'notice').map(({ content, tone }) => ({ content, tone }));
+  try {
+    await app.runtime.change(state => { state.runs.first = blocked('first', '2026-01-02T09:00:00.000Z'); });
+    await app.runner.tick();
+    assert.deepEqual(notices(await app.refresh()), [
+      { content: 'Mail: Gmail tools are unavailable.', tone: 'blocked' },
+    ]);
+
+    await app.runtime.change(state => { state.runs.second = blocked('second', '2026-01-02T10:00:00.000Z'); });
+    await app.runner.tick();
+    assert.deepEqual(notices(await app.refresh()).at(-1), {
+      content: 'Mail: Gmail tools are unavailable. Paused until Jan 3; running it manually or editing the schedule resumes it sooner.',
+      tone: 'blocked',
+    });
   } finally {
     await app.close();
   }

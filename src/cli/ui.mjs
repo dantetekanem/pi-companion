@@ -318,6 +318,9 @@ const lifecycleLabels = {
 const scheduleStatus = ({ schedule, jobs, live, clock, frame }) => {
   if (jobs.length) return { timing: 'running now', tone: positive, glyph: positive(frame) };
   if (!schedule.enabled) return { timing: 'paused', tone: caution, glyph: muted('○') };
+  if (schedule.nextRun?.state === 'held') {
+    return { timing: `held, retries ${until(schedule.nextRun.at, clock)}`, tone: negative, glyph: negative('✕') };
+  }
   if (schedule.nextRun?.at) return { timing: until(schedule.nextRun.at, clock), tone: accent, glyph: accent('●') };
   if (schedule.nextRun?.state === 'running') {
     return live
@@ -419,9 +422,10 @@ const jobActivityLines = ({ run, blocks, inner, clock, frame, markdown }) => {
   if (!blocks.length) content.push(dim('No parent activity received yet.'));
   return content;
 };
-// Critical and useful report messages read as messages; other notices stay quiet.
+// Critical, blocked and useful report messages read as messages; other notices stay quiet.
 const noticeLooks = {
   critical: ['▲', caution, text => text],
+  blocked: ['✕', negative, text => text],
   useful: ['●', positive, text => text],
 };
 // Consecutive identical report notices from the same day collapse into one entry that keeps the latest time.

@@ -6,6 +6,24 @@ export const reportText = value => String(value ?? '')
   .replace(/<!--\s*companion-(?:publication|question):[\s\S]*?(?:-->|$)/gi, '')
   .trim();
 
+export const runOutcomeText = run => run.result?.text || run.result?.error || run.error || '';
+
+// Background reports open with a triage line (prompts/background.md).
+const nothingNewLine = /^(?:\*\*)?nothing new\.?(?:\*\*)?$/i;
+const talkBackLine = /^(?:\*\*)?(critical|useful|blocked)(?:\*\*)?:(?:\*\*)?\s+(.+)$/i;
+export const reportTriage = run => {
+  if (run.status !== 'completed') return null;
+  const firstLine = String(run.result?.text ?? '').trim().split('\n', 1)[0].trim();
+  if (nothingNewLine.test(firstLine)) return { level: 'nothing' };
+
+  const match = firstLine.match(talkBackLine);
+  if (!match) return null;
+  return {
+    level: match[1].toLowerCase(),
+    message: match[2].replace(/\*\*$/, '').trim().slice(0, 1024),
+  };
+};
+
 const reportPath = (root, id) => join(root, 'reports', `${createHash('sha256').update(String(id)).digest('hex')}.md`);
 const statOrMissing = file => {
   try { return lstatSync(file); } catch (error) {

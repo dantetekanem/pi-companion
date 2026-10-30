@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { CompanionRuntime } from '../src/cli/runtime.mjs';
@@ -205,4 +205,26 @@ test('background dispatch commits final receipts once and a second call cannot r
   } finally {
     await runtime.close();
   }
+});
+
+test('finished and abandoned checks each land in the check log exactly once', async t => {
+  const { root, config } = home(t);
+  const request = id => ({ id, kind: 'background', scheduleId: 'mail', title: 'Mail', harness: 'pi' });
+  const first = await CompanionRuntime.open(root, config, { createMain: mainFactory() });
+  await first.dispatch(request('mail:1'), async () => ({
+    status: 'completed',
+    text: 'Blocked: Gmail tools are unavailable.\n\nDetails.',
+    cost: { usd: 0.25, kind: 'estimate' },
+  }));
+  await first.finish('mail:1', (await first.state()).runs['mail:1'].result);
+  await first.admit(request('mail:2'));
+  await first.close();
+
+  const second = await CompanionRuntime.open(root, config, { createMain: mainFactory() });
+  await second.close();
+
+  const lines = readFileSync(join(root, 'checks/mail/log.md'), 'utf8').trim().split('\n');
+  assert.equal(lines.length, 2);
+  assert.match(lines[0], /\| scheduled \| completed \| \d+s \| \$0\.25 \| Blocked: Gmail tools are unavailable\.$/);
+  assert.match(lines[1], /\| scheduled \| interrupted \| \d+s \| The previous owner stopped without a completion receipt\. Not replayed\.$/);
 });

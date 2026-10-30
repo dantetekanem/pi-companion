@@ -20,6 +20,12 @@ On an explicit request, use `run_schedule` with the exact native ID. Omit the ID
 
 Do not trigger it proactively. The returned ID confirms admission; follow completion in Reports, including no-change results. Busy, failed or interrupted attempts do not authorize retries or broader access.
 
+## Check history
+
+Under the data root, `checks/<id>/log.md` has one Companion-written line per run and `checks/<id>/memory.md` is the working memory that check keeps between runs. Read these to answer what a check did or why it stopped; do not reconstruct history from `jobs/` or the runtime database.
+
+A check blocked twice in a row is held: it shows in Schedules and retries after a day, then at growing intervals up to a week. `run_schedule` still runs it, and a working run or a schedule edit clears the hold. When the user resolves a blocker or changes what a check should remember, update that check's memory so the next run knows.
+
 ## Schedule settings
 
 Edit the requested Markdown files under the supplied schedules path. Preserve timezone, instructions, bindings, permissions and enabled state unless asked to change them.

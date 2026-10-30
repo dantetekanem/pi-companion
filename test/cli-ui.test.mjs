@@ -813,6 +813,16 @@ test('schedule lifecycle survives snapshot refreshes without inventing completio
   }
 });
 
+test('a held schedule reads as held, not as an ordinary upcoming check', () => {
+  const ui = createDashboard({ ...snapshot, connection: 'connected', schedules: [{
+    ...snapshot.schedules[0],
+    nextRun: { state: 'held', at: new Date(Date.now() + 86400000).toISOString(), reason: 'Gmail tools are unavailable.' },
+  }] });
+  ui.input('\x1b[D');
+
+  assert.match(screen(ui, 120, 40), /held, retries in/i);
+});
+
 const liveJob = id => ({ id, title: 'E-mail follow-ups', state: 'running', kind: 'background', scheduleId: 'mail' });
 const liveSnapshot = { ...snapshot, connection: 'connected', runs: [liveJob('a'), liveJob('b')] };
 

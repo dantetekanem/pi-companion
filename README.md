@@ -44,6 +44,10 @@ Ask the agent to run a configured check now, even if its recurring schedule is p
 
 The agent keeps a short list of what matters right now in `memory.md` in the data folder: up to 20 one-line items that it adds, updates and removes as things change. Ask it to remember or forget something, or edit the file yourself. The list stays within Companion, chat sees it on every turn, and scheduled checks can read it but not change it.
 
+Each check also keeps its own folder at `~/.companion/checks/<id>/`, and every run starts with both files in it. `memory.md` is the check's working memory: checkpoints, open items and what it has already reported. Its agent maintains the file, and you can edit it too. `log.md` has one line per run, written by Companion, with the time, trigger, outcome, duration, cost and first report line.
+
+A check that cannot do its work says `Blocked:` in Chat. After two blocked or failed runs in a row, Companion stops scheduling it instead of retrying: Schedules shows it as held, and it tries again after 1 day, then 2, 4 and 7. A working run or a schedule edit clears the hold, and you can still run it on request.
+
 ## Add a schedule
 
 Create a Markdown file in `~/.companion/schedules/daily/`, `weekly/` or `monthly/`:

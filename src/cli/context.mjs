@@ -1,12 +1,13 @@
 import { constants } from 'node:fs';
 import { lstat, open, realpath } from 'node:fs/promises';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { runOutcomeText } from './reports.mjs';
 
 const MAX_FILE_BYTES = 32768;
 const MAX_PROMPT_BYTES = 65536;
 
 /** Explicit regular-file sources only. This bounds context, not the child's filesystem access. */
-export async function buildContext(schedule, latestOutcome = null, memory = []) {
+export async function buildContext(schedule, latestOutcome = null, memory = [], check = { memory: null, log: [] }) {
   const cwd = resolve(schedule.cwd);
   if (await realpath(cwd) !== cwd || !(await lstat(cwd)).isDirectory()) {
     throw Error('cwd must be a real directory without symlinks');
@@ -48,9 +49,11 @@ export async function buildContext(schedule, latestOutcome = null, memory = []) 
     schedule: { id: schedule.id, title: schedule.title, instructions: schedule.prompt },
     sources,
     memory,
+    checkMemory: check.memory,
+    log: check.log,
     latestOutcome: latestOutcome ? {
       status: latestOutcome.status,
-      text: String(latestOutcome.result?.text ?? '').slice(0, 4096),
+      text: String(runOutcomeText(latestOutcome)).slice(0, 4096),
     } : null,
   };
   const prompt = JSON.stringify(envelope);

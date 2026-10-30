@@ -8,13 +8,15 @@ The main conversation uses Pi's SDK and SessionManager. It loads ordinary tools,
 
 Background checks use separate Pi RPC sessions and verify each schedule's model/effort before submission. Anthropic/Claude models work through Pi. The CLI has no Claude executable or Teams-specific integration.
 
-Checks receive their instructions, named context files and a limited previous outcome rather than the main transcript. Context files must be regular files within the working directory, at most 32 KiB each. The complete supplied context is limited to 64 KiB. This preload rule is not a sandbox: Pi tools retain their configured access.
+Checks receive their instructions, named context files, their working memory, their recent log lines and a limited previous outcome rather than the main transcript. Each run is a fresh process, so these are all it inherits. Context files must be regular files within the working directory, at most 32 KiB each. The complete supplied context is limited to 64 KiB. This preload rule is not a sandbox: Pi tools retain their configured access.
 
 Companion reserves each dispatch before work starts and saves its result before reporting completion. After a crash, a dispatch without a conclusive result becomes interrupted rather than replaying automatically. Cancellation terminates and reaps owned children. Jobs have no automatic execution deadline.
 
 ## State and reports
 
 Under the workspace root, `runtime/companion.sqlite` stores dispatch receipts, `runtime/usage.json` stores usage, and `reports/` holds new Markdown reports. Listings also include imported history and runtime records. Pi owns conversation files.
+
+`checks/<id>/memory.md` is a check's working memory, written by its agent; only the first 8 KiB reach a run, flagged as truncated when cut. `checks/<id>/log.md` has one line per finished run, written by Companion after the receipt commits, and keeps its newest lines once it passes 64 KiB. Receipts stay authoritative; a log write failure never changes an outcome.
 
 Reports retain output alongside execution errors without a JSON envelope or tracking comments. Model completion does not establish successful collection, reading or usefulness.
 
@@ -25,6 +27,8 @@ Only one dashboard, headless runner or pattern-review submission can own a works
 The [schedule guide](../src/prompts/schedule-setup.md) defines JSON-frontmatter files and local-calendar timing. The runner reloads files before admission and dispatch. Invalid definitions, duplicate IDs and explicit non-Pi bindings produce errors rather than using cached authority or rewriting history.
 
 Stable occurrence IDs prevent duplicate dispatch. Missed dates are not replayed. Imported intervals and irregular cron retain their original semantics through the compatibility adapter.
+
+Receipts also decide whether a native check is held. Failed, incomplete and `Blocked:` runs form a streak; interrupted and never-started runs neither extend nor clear it. Two in a row hold the check for a day after the latest one, and each further stalled run doubles the wait up to a week. Occurrences skipped by a hold leave no receipt and are not replayed. A working run or a changed schedule definition ends the streak, and a manual run ignores the hold.
 
 ## Terminal
 

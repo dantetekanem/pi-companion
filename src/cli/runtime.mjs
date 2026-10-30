@@ -9,6 +9,7 @@ import { openNodeSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite
 import { closePiSession, openPiSession, withPiCancellation } from './pi-session.mjs';
 import { assertRuntimeAdmission } from './migration/admission.mjs';
 import { saveReport } from './reports.mjs';
+import { logRun } from './checks.mjs';
 
 const context = BACKGROUND_CONTEXT;
 const RuntimeDoc = defineDoc({
@@ -70,9 +71,9 @@ export class CompanionRuntime {
       runtime.root = await runtime.harness.root(context, {
         init: async (tx, id) => { await tx.doc(RuntimeDoc, id); },
       });
-      await runtime.change(state => {
-        for (const run of Object.values(state.runs)) {
-          if (run.status !== 'running') continue;
+      const abandoned = await runtime.change(state => {
+        const stopped = Object.values(state.runs).filter(run => run.status === 'running');
+        for (const run of stopped) {
           Object.assign(run, {
             status: 'interrupted',
             cost: null,
@@ -80,7 +81,9 @@ export class CompanionRuntime {
             finishedAt: new Date().toISOString(),
           });
         }
+        return copy(stopped);
       });
+      for (const run of abandoned) logRun(root, run);
       return runtime;
     } catch (error) {
       if (runtime.harness) await runtime.harness.close(context);
@@ -269,14 +272,14 @@ export class CompanionRuntime {
   }
   async finish(id, result) {
     if (!['completed', 'failed', 'interrupted', 'no_change', 'incomplete'].includes(result.status)) throw Error('Invalid completion status.');
-    return this.change(state => {
+    const finished = await this.change(state => {
       const run = state.runs[id];
       if (!run) throw Error('No dispatch admission exists.');
       if (run.status !== 'running') {
         if (JSON.stringify(run.result) !== JSON.stringify(result)) {
           throw Error('A conflicting receipt cannot replace a final outcome.');
         }
-        return;
+        return null;
       }
       if (run.kind !== 'main') {
         const report = result.text || result.error || 'No result text.';
@@ -289,7 +292,9 @@ export class CompanionRuntime {
         result: copy(result),
         finishedAt: new Date().toISOString(),
       });
+      return copy(run);
     });
+    if (finished) logRun(this.directory, finished);
   }
 
   dispatch(request, effect, onAdmitted) {

@@ -8,7 +8,7 @@ import { CompatibilityDelivery } from './compatibility.mjs';
 import { UsageLedger } from './usage.mjs';
 import { atomicJson, loadConfig } from './config.mjs';
 import { readLocalView } from './view.mjs';
-import { deletedReportIds, readReport, reportText } from './reports.mjs';
+import { deletedReportIds, readReport, reportText, reportTriage, runOutcomeText } from './reports.mjs';
 export { readLocalView } from './view.mjs';
 
 const textOf = message => reportText(typeof message.content === 'string' ? message.content
@@ -16,20 +16,9 @@ const textOf = message => reportText(typeof message.content === 'string' ? messa
 const isVisibleScheduledReport = run => run.kind === 'background'
   && typeof run.scheduleId === 'string' && run.scheduleId.length > 0
   && run.status !== 'running' && (run.status !== 'no_change' || run.trigger === 'manual');
-// Background reports open with a triage line (prompts/background.md); only critical and useful ones talk back in chat.
-const nothingNewLine = /^(?:\*\*)?nothing new\.?(?:\*\*)?$/i;
-const talkBackLine = /^(?:\*\*)?(critical|useful)(?:\*\*)?:(?:\*\*)?\s+(.+)$/i;
-const reportTriage = run => {
-  if (run.status !== 'completed') return null;
-  const firstLine = String(run.result?.text ?? '').trim().split('\n', 1)[0].trim();
-  if (nothingNewLine.test(firstLine)) return { level: 'nothing' };
-
-  const match = firstLine.match(talkBackLine);
-  if (!match) return null;
-  return {
-    level: match[1].toLowerCase(),
-    message: match[2].replace(/\*\*$/, '').trim().slice(0, 1024),
-  };
+const pauseNote = ({ nextRun, timezone }) => {
+  const resumes = new Date(nextRun.at).toLocaleDateString('en-US', { month: 'short', day: 'numeric', timeZone: timezone });
+  return ` Paused until ${resumes}; running it manually or editing the schedule resumes it sooner.`;
 };
 const messageTime = message => {
   const value = message.at ?? message.timestamp;
@@ -140,7 +129,7 @@ export class CompanionApplication {
       .filter(run => run.kind !== 'main' && run.status !== 'running' && (run.status !== 'no_change' || run.trigger === 'manual'))
       .filter(run => !deleted.has(run.id))
       .map(run => {
-        const text = run.result?.text || run.result?.error || run.error || 'No result text.';
+        const text = runOutcomeText(run) || 'No result text.';
         const coverage = run.result?.coverage
           ? `\n\nCoverage: ${JSON.stringify(run.result.coverage)}\nOmissions: ${JSON.stringify(run.result.omissions)}`
           : '';
@@ -167,11 +156,16 @@ export class CompanionApplication {
       const triage = reportTriage(run);
       if (triage?.level === 'nothing') continue;
 
+      const schedule = loaded.schedules.find(item => item.id === run.scheduleId);
+      const held = schedule?.nextRun?.state === 'held';
+      const message = triage?.message ?? (held ? schedule.nextRun.reason : null);
       notices.push({
         id,
         role: 'notice',
-        content: triage ? `${scheduleName}: ${triage.message}` : `Report available for ${scheduleName}`,
-        tone: triage?.level,
+        content: message
+          ? `${scheduleName}: ${message}${held ? pauseNote(schedule) : ''}`
+          : `Report available for ${scheduleName}`,
+        tone: held ? 'blocked' : triage?.level,
         at: run.finishedAt,
       });
       noticeIds.add(id);

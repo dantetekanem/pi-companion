@@ -3,6 +3,9 @@
 ## Unreleased
 
 - Add Companion-only memory: a short list in `memory.md` that the agent maintains. Chat sees it on every turn; scheduled checks can read it but not change it.
+- Give each check a `memory.md` it maintains and a Companion-written `log.md` under `checks/<id>/`, both supplied to every run, so checks stop rediscovering their tools and reconstructing their history from transcripts and the database.
+- Add a `Blocked:` report line and stop retrying stuck checks. After two blocked or failed runs in a row, a check is held and tries again after 1, 2, 4, then 7 days. A working run or a schedule edit clears the hold, and manual runs still work.
+- Show the next run the newest outcome, including manual runs and failure errors that were previously dropped.
 - Keep scheduled checks running until every agent they spawned has reported, so a check no longer finishes with its interim reply as the report.
 - Exit as soon as Companion has closed, so a leftover connection cannot delay quitting.
 - Separate report notices in Chat with a blank line.

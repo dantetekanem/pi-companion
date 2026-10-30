@@ -5,6 +5,7 @@ import { loadSchedules, scheduleTimes } from './schedules.mjs';
 import { runHarness as defaultRunHarness } from './harnesses.mjs';
 import { buildContext } from './context.mjs';
 import { readMemory } from './memory.mjs';
+import { checkHold, openCheck, scheduleDefinition } from './checks.mjs';
 
 function partsAt(formatter, time) {
   return Object.fromEntries(formatter.formatToParts(time)
@@ -159,6 +160,7 @@ export class CompanionRunner {
       // Keep completed admissions when a setting changes between one time and a list.
       if (Object.values(state.runs).some(run => run.scheduleId === schedule.id && run.scheduledAt === occurrence.scheduledAt)) continue;
       if (Object.values(state.runs).some(run => run.scheduleId === schedule.id && run.status === 'running')) continue;
+      if (checkHold(schedule, Object.values(state.runs), now.getTime())) continue;
       try {
         await this.startNative(schedule, occurrence, state);
         capacity--;
@@ -209,8 +211,8 @@ export class CompanionRunner {
     if (schedule.harness !== 'pi') throw Error('Execution requires an explicit Pi binding.');
     const previous = Object.values(state.runs)
       .filter(run => run.scheduleId === schedule.id && run.status !== 'running')
-      .sort((a, b) => (b.scheduledAt ?? '').localeCompare(a.scheduledAt ?? ''))[0];
-    const prompt = await buildContext(schedule, previous, readMemory(this.root));
+      .sort((a, b) => (b.finishedAt ?? '').localeCompare(a.finishedAt ?? ''))[0];
+    const prompt = await buildContext(schedule, previous, readMemory(this.root), openCheck(this.root, schedule.id));
     const id = randomUUID();
     const directory = join(this.root, 'jobs');
     await mkdir(directory, { recursive: true, mode: 0o700 });
@@ -232,6 +234,7 @@ export class CompanionRunner {
       effort: schedule.effort,
       cwd: schedule.cwd,
       harnessId: id,
+      definition: scheduleDefinition(schedule),
     }, async signal => {
       const admitted = loadSchedules(this.root).schedules.find(item => item.id === schedule.id);
       if (!admitted || JSON.stringify(admitted) !== JSON.stringify(schedule)) {
@@ -349,9 +352,15 @@ export class CompanionRunner {
             nextRun = { state: 'pending', at: null, reason: 'awaiting_scheduler' };
           }
         } else {
-          const next = nextOccurrence(schedule, now, { runs: related, notBefore: this.config.initializedAt });
-          nextRun = next ? { state: 'scheduled', at: next.scheduledAt }
-            : { state: 'blocked', at: null, reason: 'no_occurrence_in_forecast' };
+          const hold = checkHold(schedule, related, now.getTime());
+          const next = nextOccurrence(schedule, hold?.until ?? now, { runs: related, notBefore: this.config.initializedAt });
+          if (hold) {
+            const resumesAt = next && Date.parse(next.scheduledAt) > Date.parse(hold.until) ? next.scheduledAt : hold.until;
+            nextRun = { state: 'held', at: resumesAt, reason: hold.reason };
+          } else {
+            nextRun = next ? { state: 'scheduled', at: next.scheduledAt }
+              : { state: 'blocked', at: null, reason: 'no_occurrence_in_forecast' };
+          }
         }
       }
       return { ...structuredClone(schedule), nextRun };

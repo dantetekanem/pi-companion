@@ -29,10 +29,11 @@ class MemoryRuntime {
   async state() { return structuredClone(this.data); }
   async change(fn) { return fn(this.data); }
 
-  dispatch(request, effect) {
+  dispatch(request, effect, onAdmitted) {
     if (this.data.runs[request.id]) return Promise.resolve(this.data.runs[request.id]);
     const controller = new AbortController();
     const run = this.data.runs[request.id] = { ...request, status: 'running' };
+    onAdmitted?.();
     const work = Promise.resolve()
       .then(() => effect(controller.signal))
       .catch(error => ({ status: 'failed', error: error.message }))
@@ -86,6 +87,102 @@ test('harness previews bind to occurrence IDs, not fresh harness UUIDs, and obse
   await h.runtime.idle();
   assert.deepEqual(seen, [['check:2026-01-02', { type: 'message_update' }]]);
   assert.equal(h.runtime.data.runs['check:2026-01-02'].status, 'completed');
+});
+
+test('a run receives its check memory, log and the newest outcome, even when that run was manual and failed', async t => {
+  const h = await fixture(t);
+  await mkdir(join(h.root, 'checks/check'), { recursive: true });
+  await writeFile(join(h.root, 'checks/check/memory.md'), '- Checkpoint: 2026-01-01\n');
+  await writeFile(join(h.root, 'checks/check/log.md'), '- 2026-01-01T09:05:00.000Z | scheduled | completed | 5s | Nothing new.\n');
+  Object.assign(h.runtime.data.runs, {
+    'check:2026-01-01': {
+      id: 'check:2026-01-01', scheduleId: 'check', kind: 'background', status: 'completed',
+      scheduledAt: '2026-01-01T09:00:00.000Z', finishedAt: '2026-01-01T09:05:00.000Z',
+      result: { status: 'completed', text: 'Nothing new.' },
+    },
+    'once:manual': {
+      id: 'once:manual', scheduleId: 'check', kind: 'background', status: 'failed', trigger: 'manual',
+      finishedAt: '2026-01-01T12:00:00.000Z', result: { status: 'failed', error: 'Gmail tools are unavailable.' },
+    },
+  });
+  let envelope;
+  const runner = new CompanionRunner({
+    ...h, config, now: () => new Date('2026-01-02T10:00:00Z'),
+    runHarness: async request => {
+      envelope = JSON.parse(request.prompt);
+      return { status: 'completed', text: 'Nothing new.' };
+    },
+  });
+
+  await runner.tick();
+  await h.runtime.idle();
+
+  assert.deepEqual(envelope.latestOutcome, { status: 'failed', text: 'Gmail tools are unavailable.' });
+  assert.deepEqual(envelope.checkMemory, {
+    path: join(h.root, 'checks/check/memory.md'),
+    text: '- Checkpoint: 2026-01-01\n',
+    truncated: false,
+  });
+  assert.deepEqual(envelope.log, ['- 2026-01-01T09:05:00.000Z | scheduled | completed | 5s | Nothing new.']);
+});
+
+test('a check blocked twice stops being scheduled, shows when it resumes, and still runs on request', async t => {
+  const h = await fixture(t, { at: undefined, window: { start: '09:00', end: '17:00', everyMinutes: 60 } });
+  for (const hour of ['09', '10']) {
+    const id = `check:2026-01-02:${hour}:00`;
+    h.runtime.data.runs[id] = {
+      id, scheduleId: 'check', kind: 'background', status: 'completed',
+      scheduledAt: `2026-01-02T${hour}:00:00.000Z`, finishedAt: `2026-01-02T${hour}:01:00.000Z`,
+      result: { status: 'completed', text: 'Blocked: Gmail tools are unavailable.' },
+    };
+  }
+  let now = new Date('2026-01-02T11:00:00Z');
+  let calls = 0;
+  const runner = new CompanionRunner({
+    ...h, config, now: () => now,
+    runHarness: async () => {
+      calls++;
+      return { status: 'completed', text: 'Nothing new.' };
+    },
+  });
+
+  await runner.tick();
+  await h.runtime.idle();
+  assert.equal(calls, 0);
+  assert.deepEqual((await runner.snapshot()).schedules[0].nextRun, {
+    state: 'held',
+    at: '2026-01-03T10:01:00.000Z',
+    reason: 'Gmail tools are unavailable.',
+  });
+
+  await runner.trigger('check', 'requested-by-user');
+  await h.runtime.idle();
+  assert.equal(calls, 1);
+
+  // That success would clear the hold; drop it to prove the hold also ends by itself.
+  for (const id of Object.keys(h.runtime.data.runs)) if (id.startsWith('once:')) delete h.runtime.data.runs[id];
+  now = new Date('2026-01-03T10:02:00Z');
+  await runner.tick();
+  await h.runtime.idle();
+  assert.equal(calls, 2);
+  assert.equal(h.runtime.data.runs['check:2026-01-03:10:00'].status, 'completed');
+});
+
+test('a hold that ends after hours resumes at the next allowed time', async t => {
+  const h = await fixture(t, { at: undefined, window: { start: '09:00', end: '17:00', everyMinutes: 60 } });
+  for (const hour of ['16', '17']) {
+    const id = `check:2026-01-02:${hour}:00`;
+    h.runtime.data.runs[id] = {
+      id, scheduleId: 'check', kind: 'background', status: 'failed',
+      scheduledAt: `2026-01-02T${hour}:00:00.000Z`, finishedAt: `2026-01-02T${hour}:30:00.000Z`,
+      result: { status: 'failed', error: 'Model overloaded.' },
+    };
+  }
+  const runner = new CompanionRunner({ ...h, config, now: () => new Date('2026-01-02T18:00:00Z') });
+
+  await runner.tick();
+
+  assert.equal((await runner.snapshot()).schedules[0].nextRun.at, '2026-01-04T09:00:00.000Z');
 });
 
 test('native dispatch rejects an explicit non-Pi binding before admission', async t => {
