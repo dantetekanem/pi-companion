@@ -19,6 +19,7 @@ const wrapped = (value, width) => String(value ?? '').split('\n').flatMap(part =
 const row = (left, right, width) => cell(left, Math.max(1, width - visibleWidth(right) - 2)) + '  ' + right;
 const centered = (value, width) => ' '.repeat(Math.max(0, Math.floor((width - visibleWidth(value)) / 2))) + value;
 const key = (data, name) => matchesKey(data, name);
+const count = (amount, noun) => `${amount} ${noun}${amount === 1 ? '' : 's'}`;
 
 const style = (open, close) => text => `\x1b[${open}m${text}\x1b[${close}m`;
 const color = (...rgb) => style(`38;2;${rgb.join(';')}`, 39);
@@ -123,6 +124,28 @@ const noticeStyles = {
   warning: ['▲', caution],
   success: ['✓', positive],
 };
+const TIP_EVERY_MS = 180000;
+const TIP_SHOW_MS = 30000;
+const IDLE_REDRAW_MS = 5000;
+const FOOTER_RULE_SHARE = 0.65;
+const MIN_ROWS_FOR_TIP_LINE = 20;
+const MIN_ROWS_FOR_PINNED_DAY = 8;
+const tips = [
+  'Try another model or thinking effort? Just ask Companion.',
+  'Each schedule can have its own model and thinking effort.',
+  'Ask Companion to run any check now, even a paused one.',
+  'Ask why a check stopped. Every check keeps a run log.',
+  'Tell Companion what matters. It remembers across chats.',
+  '/clear hides the chat. /reset starts a fresh conversation.',
+];
+const ignoredTips = attention => attention.filter(item => item.ignored).map(({ title, read, reports }) =>
+  `${clean(title)}: ${read} of ${reports} reports opened. Revisit it?`);
+// Tips follow the clock rather than a timer, so each one holds still for its whole turn on screen.
+const tipAt = (choices, clock) => {
+  if (clock % TIP_EVERY_MS >= TIP_SHOW_MS) return '';
+  const turn = Math.floor(clock / TIP_EVERY_MS);
+  return choices[(Math.imul(turn + 1, 2654435761) >>> 16) % choices.length];
+};
 const toned = (text, tone, frame) => {
   const [glyph, paint] = tone === 'progress' ? [frame, highlight] : noticeStyles[tone] ?? ['', dim];
   return paint(`${glyph ? `${glyph} ` : ''}${clean(text)}`);
@@ -140,6 +163,7 @@ const outcomes = {
 const outcome = value => Object.hasOwn(outcomes, value) ? outcomes[value] : ['•', dim];
 const compactNumber = new Intl.NumberFormat('en', { notation: 'compact', maximumFractionDigits: 1 });
 const tokenCount = value => compactNumber.format(value).toLowerCase();
+const kilobytes = bytes => `${Number((bytes / 1024).toFixed(1))}kb`;
 
 const pad = value => String(value).padStart(2, '0');
 const until = (at, now) => {
@@ -200,6 +224,7 @@ const dayLabel = (at, now) => {
   const year = date.getFullYear() === today.getFullYear() ? {} : { year: 'numeric' };
   return new Intl.DateTimeFormat('en', { weekday: 'short', month: 'short', day: 'numeric', ...year }).format(date);
 };
+const dayHeading = (at, clock) => muted(bold((at === null ? 'Undated' : dayLabel(at, clock)).toUpperCase()));
 // A report's first substantive line, skipping rules, generic headings and lines that repeat its title.
 const summaryOf = report => {
   const title = clean(report.title).trim().toLowerCase();
@@ -223,19 +248,28 @@ const boxed = ({ paint, top = '', bottom = '', lines, inner }) => {
   const sides = lines.map(value => `${paint('│')} ${cell(value, inner - 4)} ${paint('│')}`);
   return [edge('╭', top, '╮'), ...sides, edge('╰', bottom, '╯')];
 };
+const ruled = ({ paint, top = '', bottom = '', lines, inner }) => {
+  const edge = label => (label
+    ? `${paint('─ ')}${label} ${paint('─'.repeat(Math.max(0, inner - visibleWidth(label) - 3)))}`
+    : paint('─'.repeat(inner)));
+  return [edge(top), ...lines, edge(bottom)];
+};
 const tabText = ({ label, count = '', prefix = '' }, active) => {
   const name = active ? highlight(bold(label)) : dim(label);
   const badge = count ? ` ${active ? highlight(count) : muted(count)}` : '';
   const text = `${prefix}${name}${badge}`;
   return { text, active, width: visibleWidth(text) };
 };
-// Tabs share the brand row when everything fits; otherwise they get a row windowed around the active tab.
-const headerLines = ({ tabs, status, inner }) => {
+// Tabs share the brand row when everything fits, shortening the status before giving up the row, because a
+// second row would push the whole screen down each time a job starts. Otherwise they get a row windowed around the active tab.
+const headerLines = ({ tabs, statuses, inner }) => {
   const span = (from, to) => tabs.slice(from, to + 1).reduce((sum, tab) => sum + tab.width, 0) + 3 * (to - from);
   const activeTab = Math.max(0, tabs.findIndex(tab => tab.active));
   const brandText = brand();
   const brandWidth = visibleWidth(brandText);
-  const inline = brandWidth + 4 + span(0, tabs.length - 1) + 2 + visibleWidth(status) <= inner;
+  const tabsEnd = brandWidth + 4 + span(0, tabs.length - 1) + 2;
+  const inlineStatus = statuses.find(status => tabsEnd + visibleWidth(status) <= inner);
+  const inline = inlineStatus !== undefined;
   let first = 0;
   let last = tabs.length - 1;
   if (span(first, last) > inner) {
@@ -260,7 +294,7 @@ const headerLines = ({ tabs, status, inner }) => {
   const underlineWidth = Math.min(tabs[activeTab].width, Math.max(0, inner - underlineStart));
   const underline = faint('─'.repeat(underlineStart)) + highlight('━'.repeat(underlineWidth))
     + faint('─'.repeat(Math.max(0, inner - underlineStart - underlineWidth)));
-  const titleRows = inline ? [row(`${brandText}    ${tabRow}`, status, inner)] : [row(brandText, status, inner), tabRow];
+  const titleRows = inline ? [row(`${brandText}    ${tabRow}`, inlineStatus, inner)] : [row(brandText, statuses[0], inner), tabRow];
   return [...titleRows, underline];
 };
 const modelLabel = (effort, model, withProvider) => {
@@ -328,23 +362,24 @@ const scheduleStatus = ({ schedule, jobs, live, clock, frame }) => {
   if (schedule.nextRun?.state === 'held') {
     return { timing: `held, retries ${until(schedule.nextRun.at, clock)}`, tone: negative, glyph: negative('✕') };
   }
-  if (schedule.nextRun?.at) return { timing: until(schedule.nextRun.at, clock), tone: accent, glyph: accent('●') };
   if (schedule.nextRun?.state === 'running') {
     return live
       ? { timing: 'running now', tone: positive, glyph: positive(frame) }
       : { timing: 'Activity unavailable (saved state)', tone: dim, glyph: muted('◌') };
   }
+  if (schedule.nextRun?.at) return { timing: until(schedule.nextRun.at, clock), tone: accent, glyph: accent('●') };
   const { reason, state } = schedule.nextRun ?? {};
   const timing = reason ? reason.replaceAll('_', ' ') : lifecycleLabels[state] ?? '';
   if (['blocked', 'failed', 'cancelled'].includes(state)) return { timing, tone: negative, glyph: negative('✕') };
   return { timing, tone: dim, glyph: muted('◌') };
 };
-const scheduleLines = ({ schedules, counts, diagnostics, activeRuns, live, inner, clock, frame }) => {
+const scheduleLines = ({ schedules, counts, diagnostics, attention, activeRuns, live, inner: fullWidth, clock, frame }) => {
   const totals = [
     `${counts.daily ?? 0} daily`, `${counts.weekly ?? 0} weekly`, `${counts.monthly ?? 0} monthly`, `${counts.once ?? 0} once`,
     counts.compatibility ? `${counts.compatibility} migrated` : '',
   ].filter(Boolean).join(' · ');
-  const content = [muted(totals), ''];
+  const inner = fullWidth - 2;
+  const content = [];
   for (const diagnostic of diagnostics) {
     const lines = wrapped(diagnostic.title, inner - 2);
     content.push(...lines.map((value, index) => `${index ? ' ' : negative('✕')} ${warning(value)}`), '');
@@ -358,12 +393,15 @@ const scheduleLines = ({ schedules, counts, diagnostics, activeRuns, live, inner
     const jobs = activeRuns.filter(run => run.scheduleId === schedule.id);
     const when = scheduleWhen(schedule, clock);
     const { timing, tone, glyph } = scheduleStatus({ schedule, jobs, live, clock, frame });
+    const unread = attention.find(item => item.ignored && item.scheduleId === schedule.id);
     return {
       jobs,
       glyph,
       tone,
       title: clean(schedule.title),
+      flag: unread ? ` ${unread.read}/${unread.reports} opened` : '',
       when: clean(when),
+      effort: clean(schedule.effort ?? ''),
       timing: clean(timing),
     };
   });
@@ -371,20 +409,23 @@ const scheduleLines = ({ schedules, counts, diagnostics, activeRuns, live, inner
   // Columns take their natural widths; narrow terminals stack each schedule instead of truncating both.
   const timingWidth = Math.max(0, ...items.map(item => visibleWidth(item.timing)));
   const naturalWhen = Math.max(0, ...items.map(item => visibleWidth(item.when)));
-  const naturalTitle = Math.max(0, ...items.map(item => visibleWidth(item.title)));
-  const room = inner - 2 - timingWidth - 4;
+  const naturalTitle = Math.max(0, ...items.map(item => visibleWidth(item.title + item.flag)));
+  const effortWidth = Math.max(6, ...items.map(item => visibleWidth(item.effort)));
+  const room = inner - 2 - timingWidth - effortWidth - 6;
   const whenWidth = Math.min(naturalWhen, Math.max(12, room - Math.min(naturalTitle, 24)));
   const titleWidth = room - whenWidth;
   const table = titleWidth >= Math.min(naturalTitle, 24) && whenWidth >= Math.min(naturalWhen, 24);
   if (table && items.length) {
-    content.push(muted(`  ${cell('SCHEDULE', titleWidth)}  ${cell('WHEN', whenWidth)}  ${'NEXT'.padStart(timingWidth)}`), '');
+    content.push(muted(`  ${cell('SCHEDULE', titleWidth)}  ${cell('WHEN', whenWidth)}  ${cell('EFFORT', effortWidth)}  ${'NEXT'.padStart(timingWidth)}`), '');
   }
   for (const item of items) {
+    const heading = bold(item.title) + caution(item.flag);
     if (table) {
       const timingPadding = ' '.repeat(timingWidth - visibleWidth(item.timing));
-      content.push(`${item.glyph} ${cell(bold(item.title), titleWidth)}  ${cell(dim(item.when), whenWidth)}  ${timingPadding}${item.tone(item.timing)}`);
+      const effort = item.effort ? effortTone(item.effort)(item.effort) : '';
+      content.push(`${item.glyph} ${cell(heading, titleWidth)}  ${cell(dim(item.when), whenWidth)}  ${cell(effort, effortWidth)}  ${timingPadding}${item.tone(item.timing)}`);
     } else {
-      content.push(`${item.glyph} ${row(bold(item.title), item.tone(item.timing), inner - 2)}`);
+      content.push(`${item.glyph} ${row(heading, item.tone(item.timing), inner - 2)}`);
       content.push(...wrapped(item.when, inner - 2).map(value => `  ${dim(value)}`));
     }
     for (const run of item.jobs) {
@@ -403,7 +444,7 @@ const scheduleLines = ({ schedules, counts, diagnostics, activeRuns, live, inner
     );
   }
   if (!schedules.length) content.push(dim('No schedules yet. Add a file to schedules/daily, weekly, monthly or once.'));
-  return content;
+  return [row(muted(bold('UPCOMING')), muted(totals), fullWidth), '', ...content.map(value => value && `  ${value}`)];
 };
 const toolState = (state, frame) => {
   if (state === 'failed') return ['✕', negative];
@@ -452,34 +493,45 @@ const chatEntries = messages => {
   }
   return entries;
 };
-const chatLines = ({ messages, inner, clock, markdown }) => {
+// Entries sit under a day heading at the same inset as report rows, so tabs line up when switching.
+const chatLines = ({ messages, inner: fullWidth, clock, markdown }) => {
+  const entries = chatEntries(messages);
+  const inner = fullWidth - 2;
   const content = [];
-  let day = null;
-  chatEntries(messages).forEach(({ message, at, latest, repeats }) => {
-    if (at !== null && dayOf(at) !== day) {
+  const days = [];
+  const entry = lines => content.push(...lines.map(value => `  ${value}`));
+  let day;
+  entries.forEach(({ message, at, latest, repeats }, index) => {
+    const startsDay = !index || (at !== null && dayOf(at) !== day);
+    if (startsDay) {
       day = dayOf(at);
-      content.push(centered(`${faint('──')} ${muted(dayLabel(at, clock))} ${faint('──')}`, inner), '');
+      if (index) content.push('');
+      const label = dayHeading(at, clock);
+      const heading = row(label, muted(count(entries.length, 'message')), fullWidth);
+      days.push({ line: content.length, heading });
+      content.push(index ? label : heading, '');
     }
     const time = at === null ? '' : muted(clockTime(at));
     if (message.role === 'notice') {
       const label = `${clean(message.content)}${repeats > 1 ? ` ×${repeats}` : ''}`;
       const latestTime = latest === null ? '' : muted(clockTime(latest));
       const [glyph, paintGlyph, paintText] = noticeLooks[message.tone] ?? ['◇', muted, dim];
-      content.push(...wrapped(label, inner - 9).map((value, part) =>
+      entry(wrapped(label, inner - 9).map((value, part) =>
         part ? `  ${paintText(value)}` : `${paintGlyph(glyph)} ${row(paintText(value), latestTime, inner - 2)}`));
       content.push('');
       return;
     }
     if (message.role === 'user') {
-      content.push(...markdown(message.content, inner - 9).map((value, part) =>
+      if (message.about) entry([`${accent('┃')} ${muted(`↳ ${clean(message.about)}`)}`]);
+      entry(markdown(message.content, inner - 9).map((value, part) =>
         `${accent('┃')} ${part || !time ? value : row(value, time, inner - 2)}`));
     } else {
       const author = message.role === 'assistant' ? assistantColor(bold('◆ Companion')) : muted(bold(`◇ ${clean(message.role)}`));
-      content.push(row(author, time, inner), ...markdown(message.content, inner - 2).map(value => `  ${value}`));
+      entry([row(author, time, inner), ...markdown(message.content, inner - 2).map(value => `  ${value}`)]);
     }
     content.push('');
   });
-  return content;
+  return { content, days };
 };
 const welcomeLines = (inner, available) => {
   const welcome = [
@@ -507,10 +559,9 @@ const reportListLines = ({ reports, total, selectedId, inner, clock }) => {
     }
     const start = content.length;
     if (startsDay) {
-      const label = muted(bold((at === null ? 'Undated' : dayLabel(at, clock)).toUpperCase()));
-      const count = reports.length < total ? `latest ${reports.length} of ${total}`
-        : `${reports.length} report${reports.length === 1 ? '' : 's'}`;
-      content.push(index ? label : row(label, muted(count), inner), '');
+      const label = dayHeading(at, clock);
+      const shown = reports.length < total ? `latest ${reports.length} of ${total}` : count(reports.length, 'report');
+      content.push(index ? label : row(label, muted(shown), inner), '');
     }
     const isSelected = report.id === selectedId;
     const [glyph, tone] = outcome(report.outcome);
@@ -550,7 +601,7 @@ const viewport = ({ content, offset, available, inner }) => {
   return Array.from({ length: available }, (_, index) => `  ${line(visible[index] ?? '', inner)}`);
 };
 
-// The dashboard draws the composer box; the editor only reports how many lines are scrolled away.
+// The dashboard draws the composer's rules; the editor only reports how many lines are scrolled away.
 class Composer extends Editor {
   renderTopBorder(_width, hidden) { return hidden > 0 ? `↑ ${hidden} more` : ''; }
   renderBottomBorder(_width, hidden) { return hidden > 0 ? `↓ ${hidden} more` : ''; }
@@ -575,6 +626,8 @@ export function createDashboard(initial, handlers = {}, options = {}) {
   let noticeTimer = null;
   let busySince = null;
   let ticker = null;
+  let reading = null;
+  let referencedReport = null;
   let hiddenMessages = new Set(snapshot.presentation?.hiddenMessageIds ?? []);
   const messageKey = message => message.id ?? JSON.stringify(message);
   const visibleMessageIds = () => (snapshot.messages ?? [])
@@ -610,7 +663,21 @@ export function createDashboard(initial, handlers = {}, options = {}) {
   const followsTail = () => view === 'conversation' || isJob();
   const showsReportList = () => view === 'reports' && (question?.previous.focus ?? focus) === 'reports';
   const selectedIndex = () => Math.max(0, reports().findIndex(report => report.id === selectedId));
-  const changed = () => { if (!stopped) onChange(); };
+  const reportOnScreen = () => {
+    if (view !== 'reports' || focus !== 'detail') return null;
+    return completedReport ?? reports()[selectedIndex()] ?? null;
+  };
+  // Every state change passes through here, so each way of leaving a report ends the same timer.
+  const trackReading = report => {
+    if (reading?.id === report?.id) return;
+    if (reading) callbacks.reportRead?.({ id: reading.id, dwellMs: now() - reading.since });
+    reading = report ? { id: report.id, since: now() } : null;
+  };
+  const changed = () => {
+    if (stopped) return;
+    trackReading(reportOnScreen());
+    onChange();
+  };
   const connected = () => snapshot.connection === 'connected' && typeof callbacks.send === 'function';
   // Spinners and elapsed time only need frames while the main turn, compaction or a job is running.
   const animate = () => {
@@ -625,6 +692,10 @@ export function createDashboard(initial, handlers = {}, options = {}) {
       ticker = null;
     }
   };
+
+  // Tips and the next-check countdown change with no event to redraw them.
+  const idleRedraw = setInterval(changed, IDLE_REDRAW_MS);
+  idleRedraw.unref?.();
 
   const editor = new Composer(options.tui ?? {
     terminal: { get rows() { return rows; } },
@@ -683,8 +754,9 @@ export function createDashboard(initial, handlers = {}, options = {}) {
       return;
     }
     say('Sending…', 'progress');
-    pending = Promise.resolve().then(() => callbacks.send(submitted)).then(() => {
+    pending = Promise.resolve().then(() => callbacks.send(submitted, referencedReport)).then(() => {
       if (editor.getExpandedText() === submitted) editor.setText('');
+      referencedReport = null;
       editor.addToHistory(submitted);
       view = 'conversation';
       focus = 'composer';
@@ -716,10 +788,11 @@ export function createDashboard(initial, handlers = {}, options = {}) {
     const indicator = !live ? muted('○') : snapshot.busy ? highlight(frame) : positive('●');
     const working = busySince ? `working ${elapsed(busySince, clock)}` : 'working';
     const connection = live && snapshot.busy ? working : clean(snapshot.connection ?? 'offline');
-    const status = [
-      `${indicator} ${dim(connection)}`,
-      activeRuns.length ? positive(`${activeRuns.length} running`) : '',
-    ].filter(Boolean).join(dim(' · '));
+    const connectionStatus = `${indicator} ${dim(connection)}`;
+    const running = positive(`${activeRuns.length} running`);
+    const statuses = activeRuns.length
+      ? [`${connectionStatus}${dim(' · ')}${running}`, connectionStatus, indicator]
+      : [connectionStatus];
     const scheduleCount = Object.values(snapshot.counts ?? {}).reduce((sum, count) => sum + count, 0);
     const tabs = [
       { name: 'conversation', label: 'Chat' },
@@ -727,7 +800,7 @@ export function createDashboard(initial, handlers = {}, options = {}) {
       { name: 'schedules', label: 'Schedules', count: String(scheduleCount) },
       ...activeRuns.map(run => ({ name: `job:${run.id}`, label: line(clean(jobTitle(run)), 24), prefix: `${positive(frame)} ` })),
     ].map(tab => tabText(tab, tab.name === view));
-    const header = headerLines({ tabs, status, inner });
+    const header = headerLines({ tabs, statuses, inner });
     const invalid = invalidSchedules().length;
     if (invalid) header.push(warning(`▲ ${invalid} invalid schedule${invalid === 1 ? '' : 's'} · see Schedules`));
     return [...header, ''];
@@ -737,9 +810,10 @@ export function createDashboard(initial, handlers = {}, options = {}) {
     if (question) return [['↑↓', 'choose'], ['enter', 'answer'], ['esc', 'cancel'], ['pgup/pgdn', 'read']];
     if (isJob()) return [['k', 'cancel job'], ['pgup/pgdn', 'scroll'], ['←→', 'views'], ['esc', 'chat']];
     if (focus === 'reports') return [['↑↓', 'select'], ['enter', 'read'], ['←→', 'views'], ['esc', 'chat']];
-    if (focus === 'detail') return [['↑↓ pgup/pgdn', 'scroll'], ['esc', 'back'], ['←→', 'views']];
+    if (focus === 'detail') return [['m', 'message'], ['↑↓ pgup/pgdn', 'scroll'], ['esc', 'back'], ['←→', 'views']];
     if (focus === 'schedules') return [['↑↓ pgup/pgdn', 'scroll'], ['←→', 'views'], ['esc', 'chat']];
     if (draft.startsWith('/')) return [['/clear', 'hide visible chat'], ['/reset', 'start a fresh main context']];
+    if (referencedReport) return [['enter', 'send'], ['esc', 'drop report'], ['ctrl+j', 'newline'], ['ctrl+c', 'quit']];
     if (draft) return [['enter', 'send'], ['ctrl+j', 'newline'], ['ctrl+c', 'quit']];
     return [['enter', 'send'], ['↑', 'history'], ['←→', 'views'], ['/', 'commands'], ['ctrl+c', 'quit']];
   };
@@ -776,17 +850,26 @@ export function createDashboard(initial, handlers = {}, options = {}) {
       ?? modelLabel(effort, model, false);
     return row(session, cost, inner);
   };
-  const composerBox = inner => {
-    const [above, ...lines] = editor.render(inner - 6);
+  const memoryAndTip = (inner, clock) => {
+    const memory = Number.isFinite(snapshot.memoryBytes)
+      ? `${muted('memory')} ${dim(kilobytes(snapshot.memoryBytes))}` : '';
+    const tip = tipAt([...tips, ...ignoredTips(snapshot.reportAttention ?? [])], clock);
+    return row(tip ? `${muted('tip')}   ${dim(tip)}` : '', memory, inner);
+  };
+  const composerLines = inner => {
+    const [above, ...lines] = editor.render(inner - 4);
     const below = lines.pop();
     const paint = editor.focused && connected() ? assistantColor : muted;
-    const placeholder = connected() ? 'Message Companion…' : 'Waiting for the main conversation…';
+    const prompted = referencedReport ? 'Ask about this report…' : 'Message Companion…';
+    const placeholder = connected() ? prompted : 'Waiting for the main conversation…';
     const empty = !editor.getExpandedText();
     const content = lines.map((value, index) => {
-      const prompt = index ? '  ' : `${connected() ? highlight('❯') : muted('❯')} `;
+      const prompt = index ? '    ' : `  ${connected() ? highlight('❯') : muted('❯')} `;
       return prompt + (empty && !index ? value.trimEnd() + muted(placeholder) : value);
     });
-    return boxed({ paint, top: above && muted(above), bottom: below && muted(below), lines: content, inner });
+    const reference = referencedReport ? `${accent('↳')} ${dim(line(clean(referencedReport.title), inner - 16))}` : '';
+    const top = [reference, above && muted(above)].filter(Boolean).join(muted(' · '));
+    return ruled({ paint, top, bottom: below && muted(below), lines: content, inner });
   };
   const questionBox = (inner, height, headerLength) => {
     const choices = question.selection.render(inner - 4);
@@ -795,7 +878,7 @@ export function createDashboard(initial, handlers = {}, options = {}) {
     const fullChoice = visibleWidth(clean(label)) > inner - 6 ? ['', ...wrapped(label, inner - 4).map(accent)] : [];
     const text = [...wrapped(question.question, inner - 4).map(bold), ...fullChoice];
     const capacity = Math.max(1, Math.min(Math.floor((height - headerLength) / 2),
-      height - headerLength - choices.length - 10));
+      height - headerLength - choices.length - 11));
     question.scroll = Math.min(question.scroll, Math.max(0, text.length - capacity));
     const visibleText = text.slice(question.scroll, question.scroll + capacity);
     return boxed({ paint: highlight, top: highlight(bold('Companion asks')), lines: [...visibleText, '', ...choices], inner });
@@ -807,9 +890,11 @@ export function createDashboard(initial, handlers = {}, options = {}) {
     let shown = hints.length;
     while (shown > 1 && visibleWidth(keys(hints.slice(0, shown))) + 2 > inner) shown--;
     const activity = activityText(keys(hints.slice(0, shown)), frame);
-    const statusLines = [`  ${activity}`, '', nextCheck(inner, clock), sessionBar(inner)];
+    const rule = centered(faint('─'.repeat(Math.round(inner * FOOTER_RULE_SHARE))), inner);
+    const statusLines = [`  ${activity}`, rule, nextCheck(inner, clock), sessionBar(inner)];
+    if (height >= MIN_ROWS_FOR_TIP_LINE) statusLines.push(memoryAndTip(inner, clock));
     if (question) return [...questionBox(inner, height, headerLength), ...statusLines];
-    if (view === 'conversation') return [...composerBox(inner), ...statusLines];
+    if (view === 'conversation') return [...composerLines(inner), ...statusLines];
     return ['', ...statusLines];
   };
   const renderContent = (inner, available, clock, frame) => {
@@ -821,6 +906,7 @@ export function createDashboard(initial, handlers = {}, options = {}) {
           schedules: snapshot.schedules ?? [],
           counts: snapshot.counts ?? {},
           diagnostics: invalidSchedules(),
+          attention: snapshot.reportAttention ?? [],
           activeRuns,
           live,
           inner,
@@ -844,8 +930,8 @@ export function createDashboard(initial, handlers = {}, options = {}) {
     if (view === 'conversation') {
       const messages = (snapshot.messages ?? []).filter(message =>
         !hiddenMessages.has(messageKey(message)) && clean(message.content).trim());
-      const content = chatLines({ messages, inner, clock, markdown });
-      return { content: content.length ? content : welcomeLines(inner, available) };
+      const { content, days } = chatLines({ messages, inner, clock, markdown });
+      return content.length ? { content, days } : { content: welcomeLines(inner, available) };
     }
     if (showsReportList()) {
       return reportListLines({ reports: reports(), total: allReports().length, selectedId, inner, clock });
@@ -914,8 +1000,10 @@ export function createDashboard(initial, handlers = {}, options = {}) {
       });
     },
     stop() {
+      trackReading(null);
       stopped = true;
       clearTimeout(noticeTimer);
+      clearInterval(idleRedraw);
       animate();
       question?.finish(null);
     },
@@ -953,6 +1041,11 @@ export function createDashboard(initial, handlers = {}, options = {}) {
           else say('No owned running job.', 'warning');
         }, error => { say(`Kill failed: ${clean(error?.message ?? error)}`, 'error'); })
           .finally(changed);
+      } else if (key(data, 'm') && focus === 'detail') {
+        referencedReport = reportOnScreen();
+        view = 'conversation';
+        focus = 'composer';
+        scroll = 0;
       } else if ((key(data, 'left') || key(data, 'right'))
         && (view !== 'conversation' || !editor.getExpandedText())) {
         const tabs = views();
@@ -975,6 +1068,7 @@ export function createDashboard(initial, handlers = {}, options = {}) {
       } else if (focus === 'composer') {
         if (key(data, 'escape')) {
           say('');
+          referencedReport = null;
         } else {
           editor.disableSubmit = clearing;
           editor.handleInput(data);
@@ -1021,7 +1115,7 @@ export function createDashboard(initial, handlers = {}, options = {}) {
       const available = Math.max(1, height - header.length - footer.length);
       contentBounds = { top: header.length, bottom: height - footer.length };
 
-      const { content, ranges = [] } = renderContent(inner, available, clock, frame);
+      const { content, ranges = [], days = [] } = renderContent(inner, available, clock, frame);
       const maximum = Math.max(0, content.length - available);
       if (!question) scroll = Math.min(scroll, maximum);
       const displayScroll = Math.min(scroll, maximum);
@@ -1037,7 +1131,11 @@ export function createDashboard(initial, handlers = {}, options = {}) {
       else if (followsTail()) offset = maximum - displayScroll;
 
       const framed = value => `  ${line(value, inner)}`;
-      return [...header.map(framed), ...viewport({ content, offset, available, inner }), ...footer.map(framed)];
+      const body = viewport({ content, offset, available, inner });
+      // Chat usually overflows, and Reports always opens on its heading, so the day stays pinned while scrolled.
+      const pinned = days.findLast(day => day.line <= offset + 1);
+      if (pinned && available >= MIN_ROWS_FOR_PINNED_DAY) body.splice(0, 2, framed(pinned.heading), framed(''));
+      return [...header.map(framed), ...body, ...footer.map(framed)];
     },
   };
   animate();

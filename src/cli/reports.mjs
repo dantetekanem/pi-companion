@@ -31,6 +31,37 @@ const statOrMissing = file => {
     throw error;
   }
 };
+
+// Well under Runtime's 64 KiB message limit, leaving the user room to write.
+const MAX_REFERENCED_BYTES = 24576;
+const referenceBlock = /^<companion-report>\n(.+)\n[\s\S]*?\n<\/companion-report>\n\n/;
+
+/** Puts a report in front of a message. Escaping its closing tag means report text can never end the block early. */
+export function referToReport(root, report, text) {
+  const bytes = Buffer.from(String(report.body ?? ''));
+  const saved = reportPath(root, report.id);
+  const details = {
+    id: report.id,
+    title: report.title,
+    at: report.at ?? null,
+    path: statOrMissing(saved) ? saved : null,
+    truncated: bytes.length > MAX_REFERENCED_BYTES,
+  };
+  const body = bytes.subarray(0, MAX_REFERENCED_BYTES).toString('utf8').replaceAll('</companion-report', '<\\/companion-report');
+  return `<companion-report>\n${JSON.stringify(details)}\n${body}\n</companion-report>\n\n${text}`;
+}
+
+/** Recovers what the user typed and the title of the report it was about. */
+export function splitReportReference(message) {
+  const block = message.match(referenceBlock);
+  if (!block) return { text: message, about: null };
+  try {
+    return { text: message.slice(block[0].length), about: JSON.parse(block[1]).title };
+  } catch {
+    return { text: message, about: null };
+  }
+}
+
 function reportDirectory(root) {
   const directory = join(root, 'reports');
   const stat = statOrMissing(directory);

@@ -20,6 +20,8 @@ Under the workspace root, `runtime/companion.sqlite` stores dispatch receipts, `
 
 `checks/<id>/memory.md` is a check's working memory, written by its agent; only the first 8 KiB reach a run, flagged as truncated when cut. `checks/<id>/log.md` has one line per finished run, written by Companion after the receipt commits, and keeps its newest lines once it passes 64 KiB. Receipts stay authoritative; a log write failure never changes an outcome.
 
+`runtime/telemetry.jsonl` is an append-only local log of report reads and messages about reports, with run IDs and timings but no report text. It starts with a `tracking_started` event, so reports from before tracking are never judged, and keeps its newest half once it passes 1 MiB. Companion joins it with run receipts on each refresh to write `runtime/report-attention.json`, a per-check rollup with no model call. Telemetry only observes: a write failure never reaches the dashboard, and the rollup never changes a schedule.
+
 Reports retain output alongside execution errors without a JSON envelope or tracking comments. Model completion does not establish successful collection, reading or usefulness.
 
 Only one dashboard, headless runner or pattern-review submission can own a workspace. SIGINT/SIGTERM stops owned work. A stale lock may take five minutes to expire after an unclean exit. SQLite WAL with `synchronous=NORMAL` protects against process crashes, not all power failures, and cannot guarantee exactly-once external effects. Storage contract: https://github.com/earendil-works/pi/blob/v1.1.0/packages/durable/README.md#storage

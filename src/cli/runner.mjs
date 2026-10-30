@@ -335,7 +335,10 @@ export class CompanionRunner {
         if (this.loaded.errors.some(error => error.path === schedule.path)) {
           nextRun = { state: 'blocked', at: null };
         } else if (related.some(run => run.status === 'running')) {
-          nextRun = { state: 'running', at: null };
+          // A recurring check's next slot still counts as upcoming work while this run finishes.
+          const next = schedule.cadence === 'compatibility' ? null
+            : nextOccurrence(schedule, now, { runs: related, notBefore: this.config.initializedAt });
+          nextRun = { state: 'running', at: next?.scheduledAt ?? null };
         } else if (schedule.cadence === 'compatibility') {
           const last = related.toSorted((a, b) => (b.finishedAt ?? '').localeCompare(a.finishedAt ?? ''))[0];
           const task = last?.result?.compatibilityTask ?? schedule.legacy.legacy;

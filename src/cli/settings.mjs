@@ -1,6 +1,7 @@
 import { lstatSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join, sep } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { getSupportedThinkingLevels } from '@earendil-works/pi-ai';
 import { atomicJson, loadConfig } from './config.mjs';
 import { cadences, efforts, loadSchedules } from './schedules.mjs';
 import { resolveDataRoot } from './migration/admission.mjs';
@@ -10,8 +11,9 @@ function selected(scope) {
   if (!scopes.includes(scope)) throw Error(`scope must be one of: ${scopes.join(', ')}`);
   return { main: scope === 'main' || scope === 'all', background: scope === 'background' || scope === 'all', schedules: scope === 'schedules' || scope === 'all' };
 }
-function inspect(root, scope) {
+function inspect(root, scope, scheduleId) {
   const targets = selected(scope);
+  if (scheduleId !== undefined && scope !== 'schedules') throw Error('scheduleId needs scope schedules.');
   const config = loadConfig(root);
   let schedules = [];
   if (targets.schedules) {
@@ -19,12 +21,13 @@ function inspect(root, scope) {
     const dirs = cadences.map(cadence => join(root, 'schedules', cadence));
     const errors = loaded.errors.filter(item => dirs.some(dir => item.path === dir || item.path.startsWith(`${dir}${sep}`)));
     if (errors.length) throw Error(`Cannot update schedules with invalid native bindings: ${errors.map(item => item.path).join(', ')}`);
-    schedules = loaded.schedules.filter(item => item.cadence !== 'compatibility');
+    schedules = loaded.schedules.filter(item => item.cadence !== 'compatibility'
+      && (scheduleId === undefined || item.id === scheduleId));
+    if (scheduleId !== undefined && !schedules.length) throw Error(`Unknown schedule: ${scheduleId}`);
   }
   return { targets, config, schedules };
 }
-function snapshot(root, scope, state = inspect(root, scope)) {
-  const { targets, config, schedules } = state;
+function snapshot(scope, { targets, config, schedules }) {
   return {
     scope,
     ...(targets.main ? { main: { model: config.main.model, effort: config.main.effort } } : {}),
@@ -32,7 +35,9 @@ function snapshot(root, scope, state = inspect(root, scope)) {
     ...(targets.schedules ? { schedules: schedules.map(({ id, cadence, enabled, harness, model, effort }) => ({ id, cadence, enabled, harness, model, effort })) } : {}),
   };
 }
-export function readSettings(root, scope = 'all') { return snapshot(resolveDataRoot(root), scope); }
+export function readSettings(root, scope = 'all', scheduleId) {
+  return snapshot(scope, inspect(resolveDataRoot(root), scope, scheduleId));
+}
 function resolveModel(reference, modelRuntime) {
   if (typeof reference !== 'string' || /[\s\x00-\x1f\x7f]/.test(reference)) throw Error('model must be fully qualified as provider/model');
   const slash = reference.indexOf('/');
@@ -41,7 +46,24 @@ function resolveModel(reference, modelRuntime) {
   const id = reference.slice(slash + 1);
   const model = modelRuntime?.getModel(provider, id);
   if (!model || model.provider !== provider || model.id !== id) throw Error(`Model is not installed in the Pi catalog: ${reference}`);
+  // The conversation reopens on the saved model, so one it cannot use must never be saved.
+  if (modelRuntime.hasConfiguredAuth?.(provider) === false) throw Error(`No credentials for ${provider}.`);
   return model;
+}
+const catalogModel = (reference, modelRuntime) => {
+  const slash = reference?.indexOf('/') ?? -1;
+  return slash > 0 ? modelRuntime?.getModel(reference.slice(0, slash), reference.slice(slash + 1)) : undefined;
+};
+// A check fails rather than run at a level Pi would clamp, so a level it can never use must not be saved.
+function assertRunnable(schedules, model, effort, modelRuntime) {
+  for (const schedule of schedules) {
+    const target = model ?? catalogModel(schedule.model, modelRuntime);
+    const level = effort ?? schedule.effort;
+    const supported = target ? getSupportedThinkingLevels(target) : [level];
+    if (!supported.includes(level)) {
+      throw Error(`${schedule.id} cannot run at ${level} on ${target.provider}/${target.id}, which offers ${supported.join(', ')}.`);
+    }
+  }
 }
 function writeSchedule(path, model, effort) {
   const stat = lstatSync(path);
@@ -62,8 +84,8 @@ function writeSchedule(path, model, effort) {
 }
 export async function updateSettings(root, request, { modelRuntime, applyCurrent } = {}) {
   root = resolveDataRoot(root);
-  const { scope, model: reference, effort } = request ?? {};
-  const state = inspect(root, scope);
+  const { scope, scheduleId, model: reference, effort } = request ?? {};
+  const state = inspect(root, scope, scheduleId);
   if (reference === undefined && effort === undefined) throw Error('Specify model, effort, or both.');
   const bindings = [
     ...(state.targets.main ? [{ scope: 'main', harness: 'pi' }] : []),
@@ -75,13 +97,14 @@ export async function updateSettings(root, request, { modelRuntime, applyCurrent
     const incompatibleScopes = incompatible.map(item => item.scope);
     return {
       scope, error: `Requested model/effort settings are incompatible with target harnesses: ${incompatibleScopes.join(', ')}; nothing changed`,
-      persisted: { status: 'unchanged', settings: snapshot(root, scope, state), completed: [] },
+      persisted: { status: 'unchanged', settings: snapshot(scope, state), completed: [] },
       activeRuntime: { status: 'unchanged', reason: 'cross-harness preflight rejected the update' },
       unchangedScopes: [...new Set([...scopesFor(state.targets), ...bindings.filter(item => item.harness === 'pi').map(item => item.scope)])], incompatibleScopes,
     };
   }
   const resolved = reference === undefined ? undefined : resolveModel(reference, modelRuntime);
-  const initial = snapshot(root, scope, state);
+  assertRunnable(state.schedules, resolved, effort, modelRuntime);
+  const initial = snapshot(scope, state);
   const config = state.config;
   if (state.targets.main) {
     if (resolved) config.main.model = `${resolved.provider}/${resolved.id}`;
@@ -106,7 +129,7 @@ export async function updateSettings(root, request, { modelRuntime, applyCurrent
       completed.push(attempting);
     }
   } catch (error) {
-    const settings = safeSnapshot(root, scope);
+    const settings = safeSnapshot(root, scope, scheduleId);
     const changed = JSON.stringify(settings) !== JSON.stringify(initial);
     return { scope, persisted: { status: changed ? 'partial' : 'failed', settings, completed, failed: { target: attempting, error: error.message }, notWritten: targetNames.filter(name => !completed.includes(name) && name !== attempting) }, activeRuntime: { status: 'unchanged', reason: 'not attempted because persistence was incomplete' }, unchangedScopes: scopesFor(state.targets) };
   }
@@ -131,7 +154,7 @@ export async function updateSettings(root, request, { modelRuntime, applyCurrent
       };
     }
   }
-  return { scope, persisted: { status: 'complete', settings: safeSnapshot(root, scope), completed }, activeRuntime, unchangedScopes: scopesFor(state.targets) };
+  return { scope, persisted: { status: 'complete', settings: safeSnapshot(root, scope, scheduleId), completed }, activeRuntime, unchangedScopes: scopesFor(state.targets) };
 }
 function scopesFor(targets) { return ['main', 'background', 'schedules'].filter(scope => !targets[scope]); }
-function safeSnapshot(root, scope) { try { return readSettings(root, scope); } catch (error) { return { error: error.message }; } }
+function safeSnapshot(root, scope, scheduleId) { try { return readSettings(root, scope, scheduleId); } catch (error) { return { error: error.message }; } }

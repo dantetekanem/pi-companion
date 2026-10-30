@@ -5,11 +5,13 @@ import { efforts } from './schedules.mjs';
 
 const settingsScope = Type.Union(['main', 'background', 'schedules', 'all'].map(value => Type.Literal(value)));
 const settingsEffort = Type.Union([...new Set(Object.values(efforts).flat())].map(value => Type.Literal(value)));
+const settingsScheduleId = Type.Optional(Type.String({ minLength: 1, maxLength: 80, pattern: '^[a-z0-9][a-z0-9._-]*$' }));
 const settingsParameters = Type.Union([
-  Type.Object({ action: Type.Literal('inspect'), scope: settingsScope }, { additionalProperties: false }),
+  Type.Object({ action: Type.Literal('inspect'), scope: settingsScope, scheduleId: settingsScheduleId }, { additionalProperties: false }),
   Type.Object({
     action: Type.Literal('update'),
     scope: settingsScope,
+    scheduleId: settingsScheduleId,
     model: Type.Optional(Type.String({ minLength: 3, maxLength: 200 })),
     effort: Type.Optional(settingsEffort),
   }, { additionalProperties: false }),
@@ -39,7 +41,7 @@ export function createSettingsTool(run) {
   return defineTool({
     name: 'model_settings',
     label: 'Model and effort settings',
-    description: 'Inspect or update model and effort for exactly main, background, schedules, or all. Updates require an installed provider/model reference and persist only Companion settings, never Pi global defaults. Main updates also call this session’s non-persistent SDK setters; the receipt separates saved settings from the observed active binding.',
+    description: 'Inspect or update model and effort for exactly main, background, schedules, or all. Add scheduleId with scope schedules to target one schedule. Inspect lists availableModels. Updates require an installed provider/model reference and persist only Companion settings, never Pi global defaults. Main updates also change this session without saving Pi defaults and apply from the next model call; the receipt separates saved settings from the observed active binding.',
     parameters: settingsParameters,
     async execute(_id, request, signal) {
       if (!Check(settingsParameters, request)) throw Error('Invalid model settings request.');

@@ -7,13 +7,25 @@ import { JobActivity } from './job-activity.mjs';
 import { CompatibilityDelivery } from './compatibility.mjs';
 import { runHarness as defaultRunHarness } from './harnesses.mjs';
 import { UsageLedger } from './usage.mjs';
+import { Telemetry } from './telemetry.mjs';
+import { memoryBytes } from './memory.mjs';
 import { atomicJson, loadConfig } from './config.mjs';
 import { readLocalView } from './view.mjs';
-import { deletedReportIds, readReport, reportText, reportTriage, runOutcomeText } from './reports.mjs';
+import { deletedReportIds, readReport, referToReport, reportText, reportTriage, runOutcomeText, splitReportReference } from './reports.mjs';
 export { readLocalView } from './view.mjs';
 
-const textOf = message => reportText(typeof message.content === 'string' ? message.content
+const textOf = message => (typeof message.content === 'string' ? message.content
   : (message.content ?? []).filter(part => part.type === 'text').map(part => part.text).join('\n'));
+const chatMessage = message => {
+  const { text, about } = splitReportReference(textOf(message));
+  return {
+    id: createHash('sha256').update(JSON.stringify(message)).digest('hex'),
+    role: message.role,
+    content: reportText(text).slice(0, 8192),
+    at: message.timestamp ?? message.at,
+    ...(about ? { about } : {}),
+  };
+};
 const isVisibleScheduledReport = run => run.kind === 'background'
   && typeof run.scheduleId === 'string' && run.scheduleId.length > 0
   && run.status !== 'running' && (run.status !== 'no_change' || run.trigger === 'manual');
@@ -47,6 +59,7 @@ export class CompanionApplication {
     signal?.throwIfAborted();
     const app = new CompanionApplication();
     app.onChange = onChange;
+    app.now = () => new Date(now?.() ?? Date.now()).getTime();
     app.config = loadConfig(root);
     // Every job starts its Pi through the configured launcher; without one the request is untouched.
     const { launcher } = app.config;
@@ -77,6 +90,7 @@ export class CompanionApplication {
         now,
       });
       app.ledger = UsageLedger.open(app.runtime.directory, app.config.initializedAt);
+      app.telemetry = Telemetry.open(app.runtime.directory, app.now());
       app.runner = new CompanionRunner({
         runtime: app.runtime,
         root: app.runtime.directory,
@@ -181,12 +195,7 @@ export class CompanionApplication {
       ...this.runtime.messages()
         .filter(message => ['user', 'assistant', 'custom'].includes(message.role))
         .slice(-100)
-        .map(message => ({
-          id: createHash('sha256').update(JSON.stringify(message)).digest('hex'),
-          role: message.role,
-          content: textOf(message).slice(0, 8192),
-          at: message.timestamp ?? message.at,
-        })),
+        .map(chatMessage),
       ...notices,
     ].map((message, index) => ({ message, index, time: messageTime(message) }))
       .sort((left, right) => {
@@ -264,6 +273,8 @@ export class CompanionApplication {
       counts: loaded.counts,
       schedules: loaded.schedules,
       usage: this.ledger.sync(state),
+      memoryBytes: memoryBytes(this.runtime.directory),
+      reportAttention: this.telemetry.attention(runs, this.now()),
       connection: 'connected',
       busy: this.runtime.mainBusy,
       main: {
@@ -279,9 +290,20 @@ export class CompanionApplication {
     return this.snapshot;
   }
 
-  send(text) { return this.runtime.send(text); }
+  async send(text, report) {
+    if (!report) return this.runtime.send(text);
+
+    const accepted = await this.runtime.send(referToReport(this.runtime.directory, report, text));
+    this.telemetry.recordReportDiscussed(report.id, this.now());
+    return accepted;
+  }
 
   kill(runId) { return this.runner.kill(runId); }
+
+  recordReportRead(read) {
+    this.telemetry.recordReportRead(read, this.now());
+    this.requestRefresh();
+  }
 
   async reset() {
     const result = await this.runtime.reset();

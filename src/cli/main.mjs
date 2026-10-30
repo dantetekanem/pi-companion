@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { defaultRoot, initialize, legacySources } from './config.mjs';
 import { loadImportedHistory } from './history.mjs';
@@ -42,9 +43,9 @@ async function connected(options, snapshot, output, dependencies) {
       const start = dependencies.startDashboard ?? (await import('./ui.mjs')).startDashboard;
       dashboard = start(snapshot, {
         onQuit: stop,
-        send: text => {
+        send: (text, report) => {
           if (!app) throw Error('Main conversation is still connecting.');
-          return app.send(text);
+          return app.send(text, report);
         },
         clear: messageIds => savePresentationState(options.root, messageIds),
         reset: () => {
@@ -55,6 +56,7 @@ async function connected(options, snapshot, output, dependencies) {
           if (!app) throw Error('Companion is still connecting.');
           return app.kill(runId);
         },
+        reportRead: read => app?.recordReportRead(read),
       }, { theme: { cwd: snapshot.config.main.cwd } });
     } else {
       keepAlive = setInterval(() => {}, 60000);
@@ -85,7 +87,11 @@ async function connected(options, snapshot, output, dependencies) {
 export async function main(args = process.argv.slice(2), output = process.stdout, dependencies = {}) {
   const options = parseArguments(args);
   if (options.command === 'help') {
-    output.write('Pi Companion\nUsage: pi-companion [command] [options]\n  init | schedules | status | history | run  [--home directory] [--plain]\n  patterns-preview --selection file\n  patterns-submit --preview HASH --confirm HASH\n  upgrade-plan --selection file\n  upgrade-prepare --selection plan.json --confirm HASH\n  upgrade-apply --confirm MIGRATION_ID [--selection authorization.json]\n  upgrade-status\n  reports [delete ID...]  list the Reports inventory as JSON, or delete reports by ID\n');
+    output.write('Pi Companion\nUsage: pi-companion [command] [options]\n  init | schedules | status | history | run  [--home directory] [--plain]\n  patterns-preview --selection file\n  patterns-submit --preview HASH --confirm HASH\n  upgrade-plan --selection file\n  upgrade-prepare --selection plan.json --confirm HASH\n  upgrade-apply --confirm MIGRATION_ID [--selection authorization.json]\n  upgrade-status\n  reports [delete ID...]  list the Reports inventory as JSON, or delete reports by ID\n  skill  print a skill that teaches other agents to work with Companion\n');
+    return 0;
+  }
+  if (options.command === 'skill') {
+    output.write(readFileSync(new URL('../prompts/companion-skill.md', import.meta.url), 'utf8'));
     return 0;
   }
   if (options.command.startsWith('upgrade-')) {

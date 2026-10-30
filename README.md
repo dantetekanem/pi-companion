@@ -32,15 +32,20 @@ Chat opens ready to type. Reports holds completed checks; Schedules shows their 
 - **Enter** sends a message or opens the selected report.
 - **Left/Right** changes views when the chat draft is empty; otherwise it moves the cursor.
 - **Arrow keys** select reports. **Page Up/Down** and the mouse wheel scroll.
+- **m** inside a report moves to the composer with that report attached, so you can ask about it and carry on in Chat. **Escape** in the composer drops the report and keeps your draft.
 - **Escape** leaves a report or returns to Chat without losing the draft.
 - **k** cancels the selected running check. Jobs have no automatic execution deadline.
 - **Ctrl+C** quits.
 
 Type `/` to see local commands. `/clear` hides visible chat without deleting history or changing model context. `/reset` starts a fresh conversation and resets the displayed cost estimate; old transcripts, usage history and background work remain. Pi's editor shortcuts and configured editor keybindings work in the composer.
 
-Colors follow Pi's saved theme. The header shows connection state; the status bar shows model, context usage and estimated cost. Critical and useful report summaries appear in Chat; no-news reports stay in Reports.
+Colors follow Pi's saved theme. The header shows connection state; the status bar shows model, context usage and estimated cost, with the total size of Companion's memory files below it. Critical and useful report summaries appear in Chat; no-news reports stay in Reports. Occasional tips appear beside the memory size.
 
 Ask the agent to run a configured check now, even if its recurring schedule is paused. This runs it once without changing its schedule.
+
+Ask the agent for a different model or thinking effort and the conversation switches on its next model call, with no restart. Each schedule has its own model and effort, and its reports use them: name a check to change only that one, and its next run picks it up. Schedules shows each check's effort.
+
+Companion notices which reports you open or message about. A check is flagged in Schedules, and mentioned in tips, when at most 1 in 5 of its latest reports was, across at least 5 reports and a week of tracking, with no critical finding and no run you requested. Nothing changes on its own: ask the agent to revisit a flagged check. This stays in the data folder as run IDs and timings in `runtime/telemetry.jsonl` and a per-check summary in `runtime/report-attention.json`, and a summary you only read in Chat does not show up.
 
 The agent keeps a short list of what matters right now in `memory.md` in the data folder: up to 20 one-line items that it adds, updates and removes as things change. Ask it to remember or forget something, or edit the file yourself. The list stays within Companion, chat sees it on every turn, and scheduled checks can read it but not change it.
 
@@ -83,6 +88,15 @@ If Pi must start through a wrapper, for example one that sets up credentials or 
 ```
 
 Companion then starts every Pi process with that command. The main chat runs as an RPC child (`my-pi-launcher pi --mode rpc`), and checks, reflection, pattern review and repair use the same command. `env` adds variables and rejects credential-like names. Companion passes its own environment through and never reads credentials. Set `managedExtensions` when the launcher loads required extensions and refuses `--no-extensions`. Tool-free jobs then keep their other isolation flags. If the main chat's child exits, Companion says so and keeps running scheduled checks; restart it to reconnect the chat. Without `launcher`, Companion runs `pi` directly, as before.
+
+## Use it from other agents
+
+`pi-companion skill` prints a skill that teaches an agent to read reports and run history, add checks, queue one-time work and stay out of Companion's internals. Read it directly, or save it where your agent loads skills:
+
+```sh
+mkdir -p ~/.pi/agent/skills/pi-companion
+pi-companion skill > ~/.pi/agent/skills/pi-companion/SKILL.md
+```
 
 ## Run without the dashboard
 

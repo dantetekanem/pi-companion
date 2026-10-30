@@ -6,6 +6,7 @@ import { loadSchedules } from './schedules.mjs';
 import { loadImportedHistory } from './history.mjs';
 import { UsageLedger } from './usage.mjs';
 import { deletedReportIds, readReport } from './reports.mjs';
+import { memoryBytes } from './memory.mjs';
 
 const presentationPath = requestedRoot => join(resolveDataRoot(requestedRoot), 'runtime', 'presentation.json');
 const normalizeMessageIds = value => {
@@ -77,5 +78,6 @@ export function readLocalView(requestedRoot) {
     runs: saved.runs ?? [],
     connection: 'offline',
     usage: UsageLedger.open(root, config.initializedAt).snapshot(),
+    memoryBytes: memoryBytes(root),
   };
 }

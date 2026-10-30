@@ -16,6 +16,17 @@
 - Keep scheduled checks running until every agent they spawned has reported, so a check no longer finishes with its interim reply as the report.
 - Exit as soon as Companion has closed, so a leftover connection cannot delay quitting.
 - Separate report notices in Chat with a blank line.
+- Line up Chat, Reports and Schedules: each opens on the same heading row with entries at the same inset, the day stays pinned above a chat that overflows, and a divider holds one footer row across every view.
+- Show the total size of Companion's memory files in the footer.
+- Show occasional tips in the footer.
+- Let the agent change one schedule's model or effort, list the models available, and show each schedule's effort in Schedules.
+- Track which reports get opened, locally, and flag checks whose reports go unopened in Schedules and in tips, so they can be revisited.
+- Fix Companion failing to start after a saved effort the current model does not support, and refuse a model without credentials before saving it.
+- Keep a running check's next occurrence in the forecast, so the footer no longer skips an hourly check while it runs.
+- Keep the header on one row when a job starts, where it fits, by shortening the status first.
+- Add `m` inside a report to message about it: the report goes to the agent with your question, Chat shows only what you typed, and the conversation continues there.
+- Draw the composer with a line above and below instead of a box.
+- Add `pi-companion skill`, which prints a skill that teaches other agents to work with Companion.
 
 ## 0.1.6 - 2026-10-29
 

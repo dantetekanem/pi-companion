@@ -403,12 +403,35 @@ test('runner snapshots forecast only enabled, unblocked schedules and distinguis
   assert.deepEqual(snapshot.schedules.find(item => item.id === 'paused').nextRun, { state: 'paused', at: null });
   h.runtime.data.runs.running = { scheduleId: 'check', status: 'running' };
   snapshot = await runner.snapshot();
-  assert.deepEqual(snapshot.schedules.find(item => item.id === 'check').nextRun, { state: 'running', at: null });
+  assert.deepEqual(snapshot.schedules.find(item => item.id === 'check').nextRun, { state: 'running', at: '2026-04-27T09:00:00.000Z' });
   delete h.runtime.data.runs.running;
   runner.loaded.errors.push({ path: h.schedule.path ?? join(h.root, 'schedules/daily/check.md'), message: 'Missing context' });
   snapshot = await runner.snapshot();
   assert.deepEqual(snapshot.schedules.find(item => item.id === 'check').nextRun, { state: 'blocked', at: null });
   assert.equal(Object.keys(h.runtime.data.runs).length, 0);
+});
+
+test('a running recurring check keeps its next occurrence on the forecast', async t => {
+  const h = await fixture(t, { at: undefined, window: { start: '09:00', end: '18:00', everyMinutes: 60 } });
+  let now;
+  const runner = new CompanionRunner({ ...h, config, now: () => now });
+  t.after(() => runner.stop());
+  const forecastWhileRunning = async (id, time, run) => {
+    now = new Date(time);
+    h.runtime.data.runs = { [id]: { id, scheduleId: 'check', status: 'running', ...run } };
+    await runner.tick();
+    return (await runner.snapshot()).schedules[0].nextRun;
+  };
+
+  const hourly = await forecastWhileRunning('check:2026-04-27:13:00', '2026-04-27T13:00:30Z', { scheduledAt: '2026-04-27T13:00:00.000Z' });
+  assert.deepEqual(hourly, { state: 'running', at: '2026-04-27T14:00:00.000Z' });
+
+  const lastOfDay = await forecastWhileRunning('check:2026-04-27:18:00', '2026-04-27T18:00:30Z', { scheduledAt: '2026-04-27T18:00:00.000Z' });
+  assert.deepEqual(lastOfDay, { state: 'running', at: '2026-04-28T09:00:00.000Z' });
+
+  const requested = await forecastWhileRunning('once:request', '2026-04-27T13:26:00Z', { trigger: 'manual' });
+  assert.equal(requested.state, 'running');
+  assert.ok(Date.parse(requested.at) <= Date.parse('2026-04-27T14:00:00.000Z'), `expected this hour or the next, got ${requested.at}`);
 });
 
 test('legacy forecasts use saved next runs but never hide uncertain earlier attempts', async t => {

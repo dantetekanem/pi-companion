@@ -72,19 +72,7 @@ function receipts(session) {
     .map(message => JSON.parse(message.content[0].text));
 }
 
-test('SDK model settings tool persists exact scopes, updates the active session, and reports SDK clamping', async t => {
-  const root = mkdtempSync(join(tmpdir(), 'companion-settings-tool-'));
-  const config = initialize(root, { cwd: root });
-  const schedulePath = schedule(root);
-  const agentDir = join(root, 'agent');
-  const oldModel = model('old');
-  const nextModel = model('next');
-  let session;
-  t.after(() => {
-    session?.dispose();
-    rmSync(root, { recursive: true, force: true });
-  });
-
+async function syntheticRuntime(root, models) {
   const modelRuntime = await ModelRuntime.create({
     authPath: join(root, 'auth.json'),
     modelsPath: null,
@@ -98,8 +86,25 @@ test('SDK model settings tool persists exact scopes, updates the active session,
     baseUrl: 'https://invalid.test',
     apiKey: 'synthetic',
     streamSimple: () => { throw Error('Synthetic tests never call a provider.'); },
-    models: [oldModel, nextModel].map(({ provider, ...entry }) => entry),
+    models: models.map(({ provider, ...entry }) => entry),
   });
+  return modelRuntime;
+}
+
+test('SDK model settings tool persists exact scopes, updates the active session, and reports SDK clamping', async t => {
+  const root = mkdtempSync(join(tmpdir(), 'companion-settings-tool-'));
+  const config = initialize(root, { cwd: root });
+  const schedulePath = schedule(root);
+  const agentDir = join(root, 'agent');
+  const oldModel = model('old');
+  const nextModel = model('next');
+  let session;
+  t.after(() => {
+    session?.dispose();
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  const modelRuntime = await syntheticRuntime(root, [oldModel, nextModel]);
 
   const tools = ['ask_question', 'run_schedule', 'model_settings'];
   const createSession = options => createAgentSession({
@@ -124,6 +129,7 @@ test('SDK model settings tool persists exact scopes, updates the active session,
   const initialInspection = (await inspect.execute('inspect', { action: 'inspect', scope: 'main' })).details;
   assert.equal(initialInspection.settings.main.model, null);
   assert.deepEqual(initialInspection.activeMainBinding, { model: 'fixture/old', effort: 'medium' });
+  assert.deepEqual(initialInspection.availableModels.filter(name => name.startsWith('fixture/')), ['fixture/next', 'fixture/old']);
 
   const observations = [];
   emitTurn(session, [{
@@ -167,4 +173,45 @@ test('SDK model settings tool persists exact scopes, updates the active session,
     { model: 'fixture/next', effort: 'high' },
     { model: 'fixture/next', effort: 'high' },
   ]);
+
+  // The saved level stays what the user asked for, so it returns on a model that supports it.
+  session.dispose();
+  session = await open();
+  assert.equal(session.thinkingLevel, 'high');
+});
+
+test('a request for one schedule changes that schedule through the settings tool', async t => {
+  const root = mkdtempSync(join(tmpdir(), 'companion-settings-tool-'));
+  const config = initialize(root, { cwd: root });
+  schedule(root);
+  const agentDir = join(root, 'agent');
+  const oldModel = model('old');
+  let session;
+  t.after(() => {
+    session?.dispose();
+    rmSync(root, { recursive: true, force: true });
+  });
+  const modelRuntime = await syntheticRuntime(root, [oldModel]);
+  session = await openPiSession({ root, config, askQuestion: async () => undefined, triggerSchedule: async () => ({}) }, {
+    agentDir,
+    modelRuntime,
+    createSession: options => createAgentSession({
+      ...options,
+      modelRuntime,
+      model: oldModel,
+      agentDir,
+      settingsManager: SettingsManager.inMemory({ compaction: { enabled: false }, retry: { enabled: false } }),
+    }),
+  });
+  const tool = session.agent.state.tools.find(item => item.name === 'model_settings');
+
+  const { details } = await tool.execute('update', { action: 'update', scope: 'schedules', scheduleId: 'daily-check', effort: 'high' });
+
+  assert.deepEqual(details.persisted.completed, ['schedules:daily-check']);
+  assert.equal(readSettings(root, 'schedules').schedules[0].effort, 'high');
+  assert.equal(session.thinkingLevel, 'medium');
+
+  const rejected = (await tool.execute('update', { action: 'update', scope: 'schedules', scheduleId: 'missing', effort: 'low' })).details;
+  assert.equal(rejected.persisted.status, 'failed');
+  assert.match(rejected.persisted.failed.error, /Unknown schedule: missing/);
 });

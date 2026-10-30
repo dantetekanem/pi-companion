@@ -850,6 +850,25 @@ test('Schedules labels weekday lists as a range or a list', () => {
   assert.match(text, /weekly · Mon, Wed · 09:00/);
 });
 
+test('a running hourly check stays the next check, and Schedules still says it is running', () => {
+  const inTwentyMinutes = new Date(Date.now() + 20 * 60000).toISOString();
+  const tomorrow = new Date(Date.now() + 86400000).toISOString();
+  const schedules = [
+    { ...snapshot.schedules[0], id: 'mail', title: 'Email follow-ups', nextRun: { state: 'running', at: inTwentyMinutes } },
+    { ...snapshot.schedules[0], id: 'fincol', title: 'Morning fincol', nextRun: { state: 'scheduled', at: tomorrow } },
+  ];
+  const runs = [{ id: 'a', title: 'Email follow-ups', state: 'running', kind: 'background', scheduleId: 'mail' }];
+  const ui = createDashboard({ ...snapshot, connection: 'connected', schedules, runs });
+
+  assert.match(screen(ui, 120, 40), /next check\s+Email follow-ups\s+in 20m/);
+
+  ui.input('\x1b[C');
+  ui.input('\x1b[C');
+  assert.equal(ui.state().view, 'schedules');
+  assert.match(screen(ui, 120, 40), /Email follow-ups.*running now/);
+  ui.stop();
+});
+
 const liveJob = id => ({ id, title: 'E-mail follow-ups', state: 'running', kind: 'background', scheduleId: 'mail' });
 const liveSnapshot = { ...snapshot, connection: 'connected', runs: [liveJob('a'), liveJob('b')] };
 
@@ -983,6 +1002,175 @@ test('crowded job headers keep the selected tab visible without overflowing the 
     assert.ok(lines.length <= height);
     assert.ok(lines.every(value => visibleWidth(value) <= width));
   }
+});
+
+test('reading a report is timed from open to close, however it ends', () => {
+  let clock = 1000;
+  const reads = [];
+  const ui = createDashboard(snapshot, { reportRead: event => reads.push(event) }, { now: () => clock });
+
+  ui.input('\x1b[C');
+  clock += 60000;
+  assert.deepEqual(reads, [], 'selecting a row is not reading it');
+
+  ui.input('\r');
+  clock += 12000;
+  ui.input('\x1b');
+  assert.deepEqual(reads, [{ id: 'one', dwellMs: 12000 }]);
+
+  ui.input('\r');
+  clock += 4000;
+  ui.update({ ...snapshot });
+  assert.equal(reads.length, 1, 'a refresh keeps the same read open');
+  clock += 1000;
+  ui.input('\x1b[D');
+  assert.deepEqual(reads[1], { id: 'one', dwellMs: 5000 });
+
+  ui.input('\x1b[C');
+  ui.input('\r');
+  clock += 7000;
+  ui.stop();
+  assert.deepEqual(reads[2], { id: 'one', dwellMs: 7000 });
+});
+
+test('m in a report moves to the composer with that report attached, and sending carries it once', async () => {
+  const sent = [];
+  const ui = createDashboard({ ...snapshot, connection: 'connected' }, {
+    send: async (text, report) => { sent.push([text, report?.id]); },
+  });
+  ui.input('\x1b[C');
+  ui.input('\r');
+
+  ui.input('m');
+
+  assert.deepEqual([ui.state().view, ui.state().focus, ui.state().draft], ['conversation', 'composer', '']);
+  assert.match(screen(ui, 120, 40), /↳ First report/);
+  assert.match(screen(ui, 120, 40), /Ask about this report/);
+
+  ui.input('why');
+  ui.input('\r');
+  await ui.pending();
+  assert.deepEqual(sent, [['why', 'one']]);
+  assert.doesNotMatch(screen(ui, 120, 40), /↳ First report/);
+
+  ui.input('next');
+  ui.input('\r');
+  await ui.pending();
+  assert.deepEqual(sent[1], ['next', undefined]);
+  ui.stop();
+});
+
+test('a report reference survives a failed send and Escape drops it, keeping the draft', async () => {
+  const ui = createDashboard({ ...snapshot, connection: 'connected' }, {
+    send: async () => { throw Error('failed'); },
+  });
+  ui.input('\x1b[C');
+  ui.input('\r');
+  ui.input('m');
+  ui.input('why');
+
+  ui.input('\r');
+  await ui.pending();
+  assert.match(screen(ui, 120, 40), /↳ First report/);
+  assert.equal(ui.state().draft, 'why');
+
+  ui.input('\x1b');
+  assert.doesNotMatch(screen(ui, 120, 40), /↳ First report/);
+  assert.equal(ui.state().draft, 'why');
+  ui.stop();
+});
+
+test('m means message only inside a report', () => {
+  const ui = createDashboard({ ...snapshot, connection: 'connected' });
+
+  ui.input('m');
+  assert.equal(ui.state().draft, 'm');
+  ui.input('\x7f');
+
+  ui.input('\x1b[C');
+  ui.input('m');
+  assert.equal(ui.state().view, 'reports');
+  assert.equal(ui.state().focus, 'reports');
+  ui.stop();
+});
+
+test('chat shows which report a message was about', () => {
+  const messages = [{ id: 'a', role: 'user', content: 'why did this fail?', about: 'Email follow-ups', at: '2026-10-30T12:26:00' }];
+  const ui = createDashboard({ ...snapshot, messages });
+
+  assert.match(screen(ui, 120, 40), /↳ Email follow-ups[\s\S]*why did this fail\?/);
+  ui.stop();
+});
+
+test('a report opened for the user by a finishing job is timed too', () => {
+  let clock = 1000;
+  const reads = [];
+  const running = {
+    ...snapshot,
+    connection: 'connected',
+    runs: [{ id: 'job', title: 'Check', state: 'running', kind: 'background', scheduleId: 'recap' }],
+  };
+  const ui = createDashboard(running, { reportRead: event => reads.push(event) }, { now: () => clock });
+  ui.input('\x1b[D');
+  assert.equal(ui.state().view, 'job:job');
+
+  ui.update({ ...running, runs: [], completedJobReports: { job: { id: 'job', title: 'Check', at: '', body: 'Done', outcome: 'completed' } } });
+  assert.equal(ui.state().focus, 'detail');
+  clock += 9000;
+  ui.input('\x1b');
+  assert.deepEqual(reads, [{ id: 'job', dwellMs: 9000 }]);
+});
+
+test('the day stays pinned above a chat that overflows, and follows scrolling', () => {
+  const day = date => Array.from({ length: 30 }, (_, index) => ({
+    id: `${date}-${index}`, role: 'assistant', content: `Note ${date} ${index}`, at: `${date}T12:00:00`,
+  }));
+  const clock = Date.parse('2026-10-30T18:00:00');
+  const ui = createDashboard({ ...snapshot, messages: [...day('2026-10-29'), ...day('2026-10-30')] }, {}, { now: () => clock });
+  const headingRow = () => screen(ui, 80, 30).split('\n')[3];
+
+  assert.match(headingRow(), /TODAY\s+60 messages/);
+  for (let page = 0; page < 4; page++) ui.input('\x1b[5~');
+  assert.match(headingRow(), /TODAY/);
+  for (let page = 0; page < 20; page++) ui.input('\x1b[5~');
+  assert.match(headingRow(), /YESTERDAY\s+60 messages/);
+  ui.stop();
+});
+
+test('tips come and go on the clock, and mention checks that go unread', () => {
+  const attention = [{ scheduleId: 'recap', title: 'Morning recap', reports: 7, read: 0, ignored: true }];
+  const period = 180000;
+  const footerTip = (ui, width = 120) => screen(ui, width, 40).split('\n').at(-1);
+  let clock = period * 5;
+  const ui = createDashboard({ ...snapshot, reportAttention: attention, memoryBytes: 2436 }, {}, { now: () => clock });
+  const seen = new Set();
+
+  for (let turn = 0; turn < 60; turn++) {
+    clock = period * (turn + 5);
+    seen.add(footerTip(ui).match(/tip\s+(.*?)\s+memory/)?.[1]);
+    clock += 60000;
+    assert.doesNotMatch(footerTip(ui), /tip/, 'most of the time the row stays quiet');
+    assert.match(footerTip(ui), /memory 2\.4kb\s*$/);
+  }
+
+  assert.ok(seen.size >= 4, `expected variety, saw ${seen.size}`);
+  assert.ok([...seen].some(tip => /Morning recap: 0 of 7 reports opened/.test(tip)));
+  assert.ok([...seen].some(tip => /model or thinking effort/.test(tip)));
+  ui.stop();
+});
+
+test('an idle dashboard redraws often enough for tips and countdowns, then stops with it', async t => {
+  t.mock.timers.enable({ apis: ['setInterval'] });
+  let frames = 0;
+  const ui = createDashboard({ ...snapshot, connection: 'connected' }, {}, { onChange: () => { frames++; } });
+
+  t.mock.timers.tick(60000);
+  assert.ok(frames >= 6, `expected idle redraws, got ${frames}`);
+
+  ui.stop();
+  const stopped = frames;
+  t.mock.timers.tick(60000);
+  assert.equal(frames, stopped);
 });
 
 test('non-TTY status stays finite, local and ANSI-free', t => {

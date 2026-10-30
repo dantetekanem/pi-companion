@@ -800,3 +800,51 @@ test('a deletion from another process recounts the running view without a state 
     await app.close();
   }
 });
+
+test('the live view carries memory size and report attention, and reads reach telemetry', async t => {
+  const h = fixture(t);
+  writeFileSync(join(h.root, 'memory.md'), '- Rent is due\n');
+  mkdirSync(join(h.root, 'checks/check'), { recursive: true });
+  writeFileSync(join(h.root, 'checks/check/memory.md'), 'x'.repeat(1000));
+
+  assert.equal(readLocalView(h.root).memoryBytes, 1014);
+  const app = await h.openApp();
+  try {
+    assert.equal((await app.refresh()).memoryBytes, 1014);
+    await app.runtime.change(state => {
+      state.runs['run-1'] = {
+        id: 'run-1', kind: 'background', scheduleId: 'check', title: 'Check', status: 'completed',
+        finishedAt: new Date(Date.now() + 1000).toISOString(), result: { status: 'completed', text: 'Useful: Found it.' },
+      };
+    });
+    app.recordReportRead({ id: 'run-1', dwellMs: 20000 });
+
+    const view = await app.refresh();
+    assert.deepEqual(view.reportAttention.map(({ scheduleId, reports, read }) => [scheduleId, reports, read]), [['check', 1, 1]]);
+    assert.match(readFileSync(join(h.root, 'runtime/telemetry.jsonl'), 'utf8'), /report_read/);
+  } finally {
+    await app.close();
+  }
+});
+
+test('a message about a report gives the model the report and shows the chat only what was typed', async t => {
+  const h = fixture(t);
+  const app = await h.openApp();
+  const report = { id: 'run-1', title: 'Email follow-ups', at: '2026-10-30T15:01:00Z', body: 'Critical: the smart host rejected 25 messages.' };
+  try {
+    await app.send('what should I check first?', report);
+    await app.runtime.idle();
+
+    const sentToModel = app.runtime.messages().find(message => message.role === 'user').content;
+    assert.match(sentToModel, /smart host rejected 25 messages/);
+    assert.match(sentToModel, /what should I check first\?$/);
+
+    const view = await app.refresh();
+    const shown = view.messages.find(message => message.role === 'user');
+    assert.equal(shown.content, 'what should I check first?');
+    assert.equal(shown.about, 'Email follow-ups');
+    assert.match(readFileSync(join(h.root, 'runtime/telemetry.jsonl'), 'utf8'), /report_discussed/);
+  } finally {
+    await app.close();
+  }
+});

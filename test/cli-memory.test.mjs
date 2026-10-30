@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { lstatSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildContext } from '../src/cli/context.mjs';
-import { createMemoryExtension, createMemoryTool, readMemory } from '../src/cli/memory.mjs';
+import { createMemoryExtension, createMemoryTool, memoryBytes, readMemory } from '../src/cli/memory.mjs';
 
 function dataRoot(t) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'companion-memory-')));
@@ -104,4 +104,17 @@ test('a scheduled job receives memory as read-only context beside its instructio
   const envelope = JSON.parse(await buildContext(schedule, null, ['Rent is due November 1']));
 
   assert.deepEqual(envelope.memory, ['Rent is due November 1']);
+});
+
+test('memory size covers the shared list and every check, and needs neither to exist', t => {
+  const root = dataRoot(t);
+  assert.equal(memoryBytes(root), 0);
+
+  writeFileSync(memoryFile(root), 'x'.repeat(100));
+  mkdirSync(join(root, 'checks/email'), { recursive: true });
+  mkdirSync(join(root, 'checks/calendar'), { recursive: true });
+  writeFileSync(join(root, 'checks/email/memory.md'), 'x'.repeat(2000));
+  writeFileSync(join(root, 'checks/email/log.md'), 'x'.repeat(9000));
+
+  assert.equal(memoryBytes(root), 2100);
 });

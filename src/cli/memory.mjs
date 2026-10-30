@@ -1,4 +1,4 @@
-import { lstatSync, readFileSync } from 'node:fs';
+import { lstatSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { Type } from 'typebox';
 import { Check } from 'typebox/value';
@@ -34,6 +34,18 @@ function storedItems(root) {
 export const readMemory = root => storedItems(root)
   .slice(0, MAX_ITEMS)
   .map(item => item.slice(0, MAX_ITEM_LENGTH));
+
+/** Bytes of agent memory on disk: the shared list plus each check's own file. */
+export function memoryBytes(root) {
+  const size = file => {
+    const stat = lstatSync(file, { throwIfNoEntry: false });
+    return stat?.isFile() ? stat.size : 0;
+  };
+  const checks = join(root, 'checks');
+  const ids = lstatSync(checks, { throwIfNoEntry: false })?.isDirectory() ? readdirSync(checks) : [];
+  const checkFiles = ids.map(id => join(checks, id, 'memory.md'));
+  return [memoryPath(root), ...checkFiles].reduce((total, file) => total + size(file), 0);
+}
 
 function applyChange(items, { action, item, text }) {
   if (action === 'add' && items.length >= MAX_ITEMS) {

@@ -5,7 +5,7 @@ import { BRIDGE, serveBridge } from './bridge.mjs';
 import { createScheduleTool, createSettingsTool } from './companion-tools.mjs';
 import { piCommand, piEnvironment } from './launcher.mjs';
 import { createMemoryTool, readMemory } from './memory.mjs';
-import { runModelSettings } from './model-settings.mjs';
+import { keptEffort, runModelSettings } from './model-settings.mjs';
 import { MAX_SESSION_BYTES, readSessionHeader } from './migration/ownership.mjs';
 import { createQuestionTool } from './questions.mjs';
 import { startRpcProcess } from './rpc-process.mjs';
@@ -220,7 +220,10 @@ class PiRpcSession {
 
   async modelCatalog() {
     const { models } = await this.child.request('get_available_models');
-    return { getModel: (provider, id) => models.find(model => model.provider === provider && model.id === id) };
+    return {
+      getModel: (provider, id) => models.find(model => model.provider === provider && model.id === id),
+      getAvailable: () => models,
+    };
   }
 
   /** Pi's RPC setters change this session only; they do not save Pi defaults. */
@@ -337,7 +340,7 @@ export async function openRpcSession(
     if (!state.sessionId || state.sessionFile !== resolve(file) || (expected && state.sessionId !== expected.sessionId)) {
       throw Error('Main Pi conversation identity changed.');
     }
-    if (state.thinkingLevel !== config.main.effort || !model || (config.main.model && model !== config.main.model)) {
+    if (!keptEffort(state.model, config.main.effort, state.thinkingLevel) || !model || (config.main.model && model !== config.main.model)) {
       throw Error('Pi model or thinking binding changed.');
     }
     const missing = Object.keys(session.tools).filter(name => !session.hello?.tools?.includes(name));

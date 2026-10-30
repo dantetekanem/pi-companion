@@ -8,7 +8,7 @@ import { validateBinding } from './schedules.mjs';
 import { createMemoryExtension, createMemoryTool } from './memory.mjs';
 import { createQuestionTool } from './questions.mjs';
 import { createScheduleTool, createSettingsTool } from './companion-tools.mjs';
-import { runModelSettings } from './model-settings.mjs';
+import { keptEffort, runModelSettings } from './model-settings.mjs';
 import { openRpcSession } from './rpc-session.mjs';
 
 /** Caller holds the conversation reservation until the SDK and its compaction/retries settle. */
@@ -283,7 +283,7 @@ async function openConversation(
   }
   const { session, modelFallbackMessage } = await (createSession ?? createAgentSession)(options);
   currentSession.current = session;
-  if (modelFallbackMessage || session.thinkingLevel !== config.main.effort
+  if (modelFallbackMessage || !keptEffort(session.model, config.main.effort, session.thinkingLevel)
     || (config.main.model && `${session.model?.provider}/${session.model?.id}` !== config.main.model)) {
     session.dispose();
     throw Error(modelFallbackMessage ?? 'Pi model or thinking binding changed.');

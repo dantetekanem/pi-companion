@@ -455,6 +455,7 @@ test('model_settings through the bridge persists, changes the live child, and re
   const inspect = await bridge(h.fake, { op: 'tool', name: 'model_settings', id: 'call-1', params: { action: 'inspect', scope: 'main' } });
   assert.deepEqual(inspect.answer.result.details.activeMainBinding, { model: 'fixture/local', effort: 'medium' });
   assert.equal(inspect.answer.result.details.settings.main.model, 'fixture/local');
+  assert.deepEqual(inspect.answer.result.details.availableModels, ['fixture/local', 'fixture/next']);
 
   const update = await bridge(h.fake, { op: 'tool', name: 'model_settings', id: 'call-2', params: { action: 'update', scope: 'all', model: 'fixture/next', effort: 'high' } });
   const details = update.answer.result.details;
@@ -474,6 +475,34 @@ test('model_settings through the bridge persists, changes the live child, and re
 
   const rejected = await bridge(h.fake, { op: 'tool', name: 'model_settings', id: 'call-4', params: { action: 'update', scope: 'main', effort: 'xhigh' } });
   assert.equal(rejected.answer.result.details.activeRuntime.status, 'unverified');
+});
+
+test('model_settings through the bridge can target one schedule', async t => {
+  const h = fixture(t, { model: { provider: 'fixture', id: 'local', reasoning: true } });
+  const file = join(h.root, 'schedules/daily/check.md');
+  const metadata = {
+    id: 'check', title: 'Check', at: '09:00', timezone: 'UTC', enabled: false,
+    harness: 'pi', model: 'fixture/local', effort: 'low', cwd: h.root, context: [],
+  };
+  writeFileSync(file, `---\n${JSON.stringify(metadata)}\n---\nCheck it.\n`);
+  await h.connected();
+
+  const params = { action: 'update', scope: 'schedules', scheduleId: 'check', effort: 'high' };
+  const { answer } = await bridge(h.fake, { op: 'tool', name: 'model_settings', id: 'call-1', params });
+
+  assert.deepEqual(answer.result.details.persisted.completed, ['schedules:check']);
+  assert.match(readFileSync(file, 'utf8'), /"effort": "high"/);
+  assert.equal(h.fake.received.some(record => record.type === 'set_thinking_level'), false);
+});
+
+test('a saved level the model lacks still opens the launcher chat at the level Pi chose', async t => {
+  const h = fixture(t, { thinking: 'high', model: { provider: 'fixture', id: 'local', reasoning: true } });
+  h.config.main.effort = 'xhigh';
+
+  const session = await openPiSession({ root: h.root, config: h.config }, h.dependencies);
+
+  assert.equal(session.thinkingLevel, 'high');
+  await closePiSession(session);
 });
 
 test('a bridge answer is not delivered after the child that asked has gone', async t => {
