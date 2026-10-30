@@ -179,8 +179,10 @@ export async function main(args = process.argv.slice(2), output = process.stdout
     dependencies.exit?.(code);
     return code;
   }
-  output.write(`Pi Companion · ${options.root}\nDaily ${counts.daily} · Weekly ${counts.weekly} · Monthly ${counts.monthly} · Migrated ${counts.compatibility ?? 0}\n`);
+  output.write(`Pi Companion · ${options.root}\nDaily ${counts.daily} · Weekly ${counts.weekly} · Monthly ${counts.monthly} · Once ${counts.once} · Migrated ${counts.compatibility ?? 0}\n`);
+  output.write(`Main ${config.main.effort} · ${config.main.model ?? 'configured default'} · ${config.main.cwd}\n`);
   output.write(`Background ${config.background.harness} · ${config.background.effort} · ${config.background.model ?? 'configured default'}\n`);
+  if (config.launcher) output.write(`Launcher ${config.launcher.command.join(' ')}${config.launcher.managedExtensions ? ' · managed extensions' : ''}\n`);
   output.write(`Initialized ${config.initializedAt} · Main not connected · $${usage.usd.toFixed(4)} estimated (${usage.coverage})\n`);
   if (snapshot.savedAt) output.write(`Saved view ${snapshot.savedAt}; not a liveness check\n`);
   for (const item of schedules) {

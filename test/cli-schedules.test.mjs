@@ -36,7 +36,7 @@ test('initialization is model-free, private, repeatable and does not replace edi
   assert.equal(config.version, 2);
   assert.equal(config.main.cwd, '/project');
   assert.equal(statSync(join(root, 'config.json')).mode & 0o777, 0o600);
-  assert.deepEqual(readdirSync(join(root, 'schedules')).sort(), ['README.md', 'daily', 'monthly', 'weekly']);
+  assert.deepEqual(readdirSync(join(root, 'schedules')).sort(), ['README.md', 'daily', 'monthly', 'once', 'weekly']);
   const saved = { ...config, background: { harness: 'claude', model: 'sonnet', effort: 'high' } };
   writeFileSync(join(root, 'config.json'), JSON.stringify(saved));
   assert.deepEqual(initialize(root, { cwd: '/different', now: '2027-01-01T00:00:00.000Z' }), saved);
@@ -95,7 +95,7 @@ test('one paused schedule can hold multiple times and round-trip in every recurr
     assert.deepEqual(parseSchedule(formatSchedule(schedule), cadence, path), schedule);
     assert.equal(readFileSync(path, 'utf8'), source);
   }
-  assert.deepEqual(loadSchedules(root).counts, { daily: 1, weekly: 1, monthly: 1 });
+  assert.deepEqual(loadSchedules(root).counts, { daily: 1, weekly: 1, monthly: 1, once: 0 });
 });
 
 test('one paused window schedule round-trips and invalid or conflicting windows fail closed', t => {
@@ -112,7 +112,7 @@ test('one paused window schedule round-trips and invalid or conflicting windows 
     assert.deepEqual(parseSchedule(formatSchedule(schedule), cadence, path), schedule);
     assert.equal(readFileSync(path, 'utf8'), source);
   }
-  assert.deepEqual(loadSchedules(root).counts, { daily: 1, weekly: 1, monthly: 1 });
+  assert.deepEqual(loadSchedules(root).counts, { daily: 1, weekly: 1, monthly: 1, once: 0 });
   for (const invalid of [
     null, [], {}, { ...window, end: '07:00' }, { ...window, start: ['08:00'] },
     { ...window, end: '24:00' }, { ...window, everyMinutes: 0 },
@@ -144,6 +144,11 @@ test('validation rejects ambiguous configuration, unsafe input and unsupported e
     assert.throws(() => parseSchedule(file(patch), 'daily', 'daily/recap.md'), /daily\/recap.md/);
   }
   assert.throws(() => parseSchedule(file(), 'weekly', 'weekly/recap.md'), /weekday/);
+  assert.deepEqual(parseSchedule(file({ weekday: [1, 2, 3, 4, 5] }), 'weekly', 'weekly/recap.md').weekday, [1, 2, 3, 4, 5]);
+  for (const weekday of [[], [1, 1], [7], [1.5], ['1'], [[1]]]) {
+    assert.throws(() => parseSchedule(file({ weekday }), 'weekly', 'weekly/recap.md'), /weekday/);
+  }
+  assert.throws(() => parseSchedule(file({ weekday: [1] }), 'daily', 'daily/recap.md'), /weekday/);
   assert.throws(() => parseSchedule(file({ day: 32 }), 'monthly', 'monthly/recap.md'), /day/);
   assert.throws(() => parseSchedule(file({}, ''), 'daily', 'daily/recap.md'), /instructions/);
   assert.throws(() => parseSchedule(file({}, 'a'.repeat(66000)), 'daily', 'daily/recap.md'), /large/);
@@ -168,7 +173,7 @@ test('loader reports per-file errors and rejects every conflicting ID or symlink
   assert.match(result.errors.find(item => item.path === legacyPath).message, /harness.*pi/);
   assert.equal(readFileSync(legacyPath, 'utf8'), legacy);
   assert.ok(result.errors.every(item => item.path && item.message));
-  assert.deepEqual(result.counts, { daily: 0, weekly: 0, monthly: 1 });
+  assert.deepEqual(result.counts, { daily: 0, weekly: 0, monthly: 1, once: 0 });
 });
 
 test('CLI init/list uses only the explicit temporary root and fails on invalid schedules', t => {

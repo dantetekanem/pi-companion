@@ -1,6 +1,7 @@
 import { lstatSync, readFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 import { sha256 } from './inventory.mjs';
+import { MAX_SESSION_BYTES } from './ownership.mjs';
 
 function present(path) {
   try {
@@ -76,7 +77,7 @@ export function assertRuntimeAdmission(root) {
     for (const artifact of admitted.record.validation.artifacts) {
       if (!artifact.path.startsWith('imported/')) continue;
       if (artifact.path.split('/').some(part => !part || part === '..' || part === '.') || artifact.path.includes('\\')) throw Error('Invalid imported history path.');
-      if (sha256(privateBytes(join(admitted.root, artifact.path))) !== artifact.sha256) throw Error('Immutable imported history changed.');
+      if (sha256(privateBytes(join(admitted.root, artifact.path), MAX_SESSION_BYTES)) !== artifact.sha256) throw Error('Immutable imported history changed.');
     }
   }
   return admitted.root;

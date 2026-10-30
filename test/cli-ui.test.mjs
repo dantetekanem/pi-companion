@@ -800,6 +800,7 @@ test('schedule lifecycle survives snapshot refreshes without inventing completio
     ['blocked', 'missing_final_receipt', 'missing final receipt'],
     ['blocked', 'interrupted_attempt', 'interrupted attempt'],
     ['pending', 'awaiting_scheduler', 'awaiting scheduler'],
+    ['done', undefined, 'Done'],
     ['completed', undefined, 'Completed'],
     ['failed', undefined, 'Failed'],
     ['cancelled', undefined, 'Cancelled'],
@@ -821,6 +822,32 @@ test('a held schedule reads as held, not as an ordinary upcoming check', () => {
   ui.input('\x1b[D');
 
   assert.match(screen(ui, 120, 40), /held, retries in/i);
+});
+
+test('Schedules shows once files with their date, count and done state', () => {
+  const once = {
+    id: 'dentist', title: 'Dentist reminder', cadence: 'once', date: '2026-05-04', at: '15:00', timezone: 'UTC', enabled: true,
+    nextRun: { state: 'done', at: null },
+  };
+  const ui = createDashboard({ ...snapshot, connection: 'connected', counts: { ...snapshot.counts, once: 1 }, schedules: [once] });
+  ui.input('\x1b[D');
+  assert.equal(ui.state().view, 'schedules');
+  const text = screen(ui, 120, 40);
+  assert.match(text, /1 once/);
+  assert.match(text, /once · 2026-05-04 · 15:00/);
+  assert.match(text, /Done/);
+});
+
+test('Schedules labels weekday lists as a range or a list', () => {
+  const weekly = (id, weekday) => ({
+    id, title: id, cadence: 'weekly', weekday, at: '09:00', timezone: 'UTC', enabled: true,
+    nextRun: { state: 'scheduled', at: '2026-05-04T09:00:00.000Z' },
+  });
+  const ui = createDashboard({ ...snapshot, connection: 'connected', schedules: [weekly('workdays', [5, 1, 2, 3, 4]), weekly('split', [1, 3])] });
+  ui.input('\x1b[D');
+  const text = screen(ui, 120, 40);
+  assert.match(text, /weekly · Mon–Fri · 09:00/);
+  assert.match(text, /weekly · Mon, Wed · 09:00/);
 });
 
 const liveJob = id => ({ id, title: 'E-mail follow-ups', state: 'running', kind: 'background', scheduleId: 'mail' });

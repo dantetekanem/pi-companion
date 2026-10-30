@@ -4,7 +4,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { inventoryLegacy, sha256 } from '../src/cli/migration/inventory.mjs';
-import { validateOwnership } from '../src/cli/migration/ownership.mjs';
+import { pinSession, readSessionHeader, validateOwnership } from '../src/cli/migration/ownership.mjs';
 const id = 'b6502857-3ca4-4a30-a305-c6ae2b2d65da';
 function fixture(t) {
   const home = mkdtempSync(join(tmpdir(), 'companion-owner-'));
@@ -74,4 +74,16 @@ test('optional lifecycle must be supplied from the pinned archive and cannot con
   assert.throws(() => validateOwnership({ manifest, selection, quiescence: stopped(manifest), checkpoint: { ...checkpoint, controlStatus: 'running' } }), /uncertain|control/);
   assert.throws(() => validateOwnership({ manifest, selection, quiescence: stopped(manifest), checkpoint: { ...checkpoint, lifecycle: { ...checkpoint.lifecycle, setup: 'requested' } } }), /uncertain|setup/);
   assert.equal(validateOwnership({ manifest, selection, quiescence: stopped(manifest), checkpoint }).main.sessionId, id);
+});
+
+test('sessions over 64 MiB pin for migration, and startup identity reads only the header line', t => {
+  const { home, sessionFile } = fixture(t);
+  const entry = JSON.stringify({ type: 'message', id: 'large', message: { role: 'user', content: 'x'.repeat(70 * 1024 * 1024) } });
+  writeFileSync(sessionFile, `${JSON.stringify({ type: 'session', version: 3, id, cwd: home, timestamp: '2026-10-26T00:00:00Z' })}\n${entry}\n`);
+  assert.equal(pinSession(sessionFile).sessionId, id);
+  assert.deepEqual(readSessionHeader(sessionFile), { sessionId: id, cwd: home, version: 3 });
+  const other = join(home, 'other.jsonl');
+  writeFileSync(other, `${JSON.stringify({ type: 'message', id: 'not-a-header' })}\n`);
+  assert.throws(() => readSessionHeader(other), /header/);
+  assert.throws(() => readSessionHeader('relative.jsonl'), /absolute/);
 });

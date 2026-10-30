@@ -3,6 +3,7 @@ import { homedir } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { cadences, validateBinding } from './schedules.mjs';
+import { validateLauncher } from './launcher.mjs';
 import { resolveDataRoot } from './migration/admission.mjs';
 
 export const defaultRoot = () => process.env.COMPANION_HOME || join(homedir(), '.companion');
@@ -50,6 +51,7 @@ export function validateConfig(config, { allowLegacyHarness = false } = {}) {
   }
   validateBinding({ harness: 'pi', ...config.main }, { allowLegacyHarness });
   validateBinding(config.background, { allowLegacyHarness });
+  validateLauncher(config.launcher);
   // Jobs have no automatic deadline; a timeoutMs left in older configs is ignored.
   if (!Number.isInteger(config.concurrency) || config.concurrency < 1 || config.concurrency > 4) {
     throw Error('Invalid execution limits.');

@@ -2,12 +2,37 @@ import { closeSync, constants, fstatSync, openSync, readSync } from 'node:fs';
 import { isAbsolute } from 'node:path';
 import { readSource, sha256 } from './inventory.mjs';
 
+// Long-running Companion conversations exceed 64 MiB within days.
+export const MAX_SESSION_BYTES = 268435456;
+
+/** Identity only. Live main conversations grow without bound, so startup reads just the header line. */
+export function readSessionHeader(path) {
+  if (!isAbsolute(path ?? '')) throw Error('Select an absolute saved Pi session path.');
+  const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  try {
+    if (!fstatSync(fd).isFile()) throw Error('Selected Pi session must be a regular file.');
+    const bytes = Buffer.alloc(65536);
+    const count = readSync(fd, bytes, 0, bytes.length, 0);
+    const newline = bytes.subarray(0, count).indexOf(10);
+    let header;
+    try {
+      header = JSON.parse(bytes.subarray(0, newline === -1 ? count : newline).toString('utf8'));
+    } catch {
+      throw Error('Selected Pi session header is invalid.');
+    }
+    if (header?.type !== 'session' || typeof header.id !== 'string' || !header.id) throw Error('Selected Pi session header is invalid.');
+    return { sessionId: header.id, cwd: header.cwd, version: header.version };
+  } finally {
+    closeSync(fd);
+  }
+}
+
 export function pinSession(path) {
   if (!isAbsolute(path ?? '')) throw Error('Select an absolute saved Pi session path.');
   const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   try {
     const stat = fstatSync(fd);
-    if (!stat.isFile() || stat.size === 0 || stat.size > 67108864) throw Error('Selected Pi session must be a bounded regular file.');
+    if (!stat.isFile() || stat.size === 0 || stat.size > MAX_SESSION_BYTES) throw Error('Selected Pi session must be a bounded regular file.');
     const bytes = Buffer.alloc(stat.size + 1);
     let size = 0;
     let count;

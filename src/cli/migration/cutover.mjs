@@ -72,7 +72,7 @@ async function stageUpgrade(journal, options) {
   if (states.errors.length) {
     if (options.repair?.sourcePath) {
       const diagnostics = states.errors.filter(error => error.source?.path === options.repair.sourcePath);
-      const repair = await requestStateRepair(journal, { ...options.repair, diagnostics });
+      const repair = await requestStateRepair(journal, { ...options.repair, diagnostics, launcher: config.launcher });
       return { status: 'repair_review', migrationId: record.id, repair, errors: states.errors, overrides };
     }
     blocked('state', states.errors);

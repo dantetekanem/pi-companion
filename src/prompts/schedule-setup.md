@@ -1,6 +1,6 @@
 # Schedule files
 
-Put one Markdown file in `daily/`, `weekly/` or `monthly/`. Use JSON between the opening `---` lines, then the task instructions. No registration step is needed.
+Put one Markdown file in `daily/`, `weekly/`, `monthly/` or `once/`. Use JSON between the opening `---` lines, then the task instructions. No registration step is needed.
 
 ```markdown
 ---
@@ -36,7 +36,21 @@ For hourly checks between 08:00 and 17:00, replace `at` with:
 
 This schedules ten checks in one file. The interval starts at `start`; it includes `end` only when that time falls on the interval. Windows use one local day, cannot cross midnight, and accept an integer `everyMinutes` from 1 to 1440, with at most 48 checks. Use either `at` or `window`. After downtime, only the latest due check inside the window is eligible; none starts after its end minute.
 
-Weekly files also need `"weekday": 1` (Sunday 0 through Saturday 6). Monthly files need `"day": 1` (1 to 31); missing dates are skipped. All times use the named timezone. Repeated daylight-saving times run once; nonexistent times are skipped. IDs must be unique across folders.
+Weekly files also need `"weekday": 1` (Sunday 0 through Saturday 6), or a list of days such as `"weekday": [1, 2, 3, 4, 5]` for Monday to Friday. Monthly files need `"day": 1` (1 to 31); missing dates are skipped. All times use the named timezone. Repeated daylight-saving times run once; nonexistent times are skipped. IDs must be unique across folders.
+
+## One-time schedules
+
+A file in `once/` runs on one date and never again. Add `"date": "2026-05-04"` (a real local calendar date in the file's timezone) to the usual fields; only `once/` files may carry `date`. `at` (one time or a list) or `window` then apply to that date only.
+
+```json
+"date": "2026-05-04",
+"at": "15:00",
+"timezone": "America/Sao_Paulo"
+```
+
+If Companion was not running at that time, the check runs once at the next tick, however late, provided the time is after Companion's initialization. With several times, the latest passed time runs and earlier missed ones are skipped. Once a time has started, in any outcome, it never runs again; to repeat it, create a new file or change the date. Disabled files never run. The dashboard shows `scheduled`, then `done`; `expired` means the time passed before initialization and nothing ran. `run_schedule` can still run the file manually without using up the date.
+
+For "remind me at 3pm", use today's date in the user's timezone. For "in 2 hours", compute the date and `HH:mm` from the current time. Set `enabled` to `true` when the user asked for the reminder, bind the background model and effort shown in the runtime block, and write the reminder or check in the instructions. Leave finished files in place; they are the record.
 
 ## Validate and run
 

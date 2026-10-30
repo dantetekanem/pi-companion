@@ -2,12 +2,12 @@ import { lstatSync, readFileSync, readdirSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { parseCompatibility } from './legacy-schedules.mjs';
 
-export const cadences = ['daily', 'weekly', 'monthly'];
+export const cadences = ['daily', 'weekly', 'monthly', 'once'];
 export const efforts = {
   pi: ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'],
 };
 const legacyClaudeEfforts = ['low', 'medium', 'high', 'xhigh', 'max'];
-const fields = new Set(['id', 'title', 'at', 'window', 'timezone', 'enabled', 'harness', 'model', 'effort', 'cwd', 'context', 'weekday', 'day']);
+const fields = new Set(['id', 'title', 'at', 'window', 'timezone', 'enabled', 'harness', 'model', 'effort', 'cwd', 'context', 'weekday', 'day', 'date']);
 const controls = /[\x00-\x08\x0b-\x1f\x7f-\x9f]/;
 const text = value => typeof value === 'string' && value.trim().length > 0 && !controls.test(value);
 
@@ -53,6 +53,16 @@ export function scheduleTimes({ at, window }) {
   return [...times].sort();
 }
 
+export function scheduleDate(date) {
+  const match = typeof date === 'string' && date.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const [year, month, day] = match ? match.slice(1).map(Number) : [];
+  const value = match && new Date(Date.UTC(year, month - 1, day));
+  if (!match || year < 1 || value.getUTCFullYear() !== year || value.getUTCMonth() !== month - 1 || value.getUTCDate() !== day) {
+    throw Error('date must be a real YYYY-MM-DD calendar date');
+  }
+  return { year, month, day };
+}
+
 export function parseSchedule(source, cadence, path) {
   try {
     if (Buffer.byteLength(source) > 65536) throw Error('schedule is too large');
@@ -77,16 +87,20 @@ export function parseSchedule(source, cadence, path) {
     ) {
       throw Error('context must contain relative paths within cwd');
     }
+    const weekdays = [value.weekday].flat();
     if (cadence === 'weekly'
-      ? !Number.isInteger(value.weekday) || value.weekday < 0 || value.weekday > 6
+      ? !weekdays.length || new Set(weekdays).size !== weekdays.length
+        || weekdays.some(day => !Number.isInteger(day) || day < 0 || day > 6)
       : value.weekday !== undefined) {
-      throw Error('weekday must be 0–6 for weekly schedules only');
+      throw Error('weekday must be 0–6 or a list of distinct 0–6 days, for weekly schedules only');
     }
     if (cadence === 'monthly'
       ? !Number.isInteger(value.day) || value.day < 1 || value.day > 31
       : value.day !== undefined) {
       throw Error('day must be 1–31 for monthly schedules only');
     }
+    if (cadence === 'once') scheduleDate(value.date);
+    else if (value.date !== undefined) throw Error('date is for once schedules only');
 
     const prompt = match[2].trim();
     if (!text(prompt)) throw Error('instructions must be nonempty and contain no terminal controls');

@@ -8,7 +8,7 @@ The standalone CLI restores its main Pi conversation. Pi handles tools, extensio
 
 In the Pi extension, use `~/.companion-schedules.md`, relevant `~/.companion-notes/`, installed scheduler tools, exact registry headings and the owning session. Its `companion-daily:*` wake handles reflection, not routines. Record observations, outcomes, questions, publications and decisions through `companion_record`.
 
-CLI schedules are validated JSON-frontmatter Markdown under `schedules/daily`, `schedules/weekly` and `schedules/monthly` in its data root. The folder sets recurrence; legacy registry text is not a CLI definition unless supplied as context.
+CLI schedules are validated JSON-frontmatter Markdown under `schedules/daily`, `schedules/weekly`, `schedules/monthly` and `schedules/once` in its data root. The folder sets recurrence; legacy registry text is not a CLI definition unless supplied as context.
 
 ## Use evidence
 

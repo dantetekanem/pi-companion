@@ -148,3 +148,16 @@ test('reads and writes model settings within a verified activated data root', as
   assert.match(readFileSync(schedulePath, 'utf8'), /"model": "openai-codex\/gpt-6-luna"/);
   assert.equal(readSettings(home, 'all').schedules[0].model, 'openai-codex/gpt-6-luna');
 });
+
+test('settings updates cover once schedules and keep their date', { concurrency: false }, async t => {
+  const root = fixture(t);
+  const path = join(root, 'schedules/once/dentist.md');
+  const data = { id: 'dentist', title: 'Dentist', date: '2026-05-04', at: '15:00', timezone: 'UTC', enabled: true, harness: 'pi', effort: 'medium', cwd: root, context: [] };
+  writeFileSync(path, `---\n${JSON.stringify(data, null, 2)}\n---\nRemind me.\n`);
+  const result = await updateSettings(root, { scope: 'schedules', model: 'openai-codex/gpt-6-luna', effort: 'high' }, { modelRuntime });
+  const saved = readFileSync(path, 'utf8');
+  assert.match(saved, /"date": "2026-05-04"/);
+  assert.match(saved, /"effort": "high"/);
+  assert.ok(saved.endsWith('Remind me.\n'));
+  assert.deepEqual(result.persisted.settings.schedules.map(item => [item.id, item.cadence]), [['dentist', 'once']]);
+});

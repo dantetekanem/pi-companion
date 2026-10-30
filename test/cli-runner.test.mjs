@@ -366,6 +366,22 @@ test('upcoming dates preserve timezone transitions, weekly days and missing mont
   assert.equal(nextOccurrence({ ...base, cadence: 'weekly', weekday: 5 }, new Date('2026-04-27T10:00:00Z')).scheduledAt, '2026-05-01T09:00:00.000Z');
 });
 
+test('weekday lists run Monday to Friday and skip the weekend', () => {
+  const weekdays = { ...base, cadence: 'weekly', weekday: [1, 2, 3, 4, 5] };
+  assert.equal(dueOccurrence(weekdays, new Date('2026-05-01T10:00:00Z')).scheduledAt, '2026-05-01T09:00:00.000Z');
+  assert.equal(dueOccurrence(weekdays, new Date('2026-05-02T10:00:00Z')), null);
+  assert.equal(dueOccurrence(weekdays, new Date('2026-05-03T10:00:00Z')), null);
+  const friday = dueOccurrence(weekdays, new Date('2026-05-01T18:00:00Z'));
+  assert.equal(nextOccurrence(weekdays, new Date('2026-05-01T18:00:00Z'), {
+    runs: [{ ...friday, scheduleId: 'check', status: 'completed' }],
+  }).scheduledAt, '2026-05-04T09:00:00.000Z');
+  const window = { ...weekdays, at: undefined, window: { start: '09:00', end: '19:00', everyMinutes: 30 } };
+  assert.equal(dueOccurrence(window, new Date('2026-04-27T19:00:30Z')).scheduledAt, '2026-04-27T19:00:00.000Z');
+  assert.equal(dueOccurrence(window, new Date('2026-04-27T19:10:00Z')), null);
+  assert.equal(dueOccurrence(window, new Date('2026-05-02T12:10:00Z')), null);
+  assert.notEqual(dueOccurrence(window, new Date('2026-04-27T12:10:00Z')).id, dueOccurrence(window, new Date('2026-04-28T12:10:00Z')).id);
+});
+
 test('runner snapshots forecast only enabled, unblocked schedules and distinguish running work', async t => {
   const h = await fixture(t);
   await h.save({ ...h.schedule, id: 'paused', enabled: false });

@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { inventoryLegacy, sha256 } from '../src/cli/migration/inventory.mjs';
 import { MigrationJournal } from '../src/cli/migration/journal.mjs';
 import { requestStateRepair, acceptStateRepair } from '../src/cli/migration/repair.mjs';
+import { buildInvocation } from '../src/cli/harnesses.mjs';
 
 const valid = { version: 1, items: [], paused: [], started: false };
 async function fixture(t, source = '{broken') {
@@ -108,6 +109,26 @@ test('completed invalid answers can be explicitly retried only within the persis
   await requestStateRepair(journal, { ...options, run, maxAttempts: 2, retryOf: second.attempt.id });
   assert.equal(calls, 2);
   await assert.rejects(requestStateRepair(journal, { ...options, run, maxAttempts: 3, retryOf: second.attempt.id }), /budget|scope/);
+});
+
+test('a repair starts its Pi through the migration launcher, and without one the request is unchanged', async t => {
+  const { journal, options, response } = await fixture(t);
+  const requests = [];
+  const run = async request => {
+    requests.push(request);
+    return response();
+  };
+  const launcher = { command: ['my-pi-launcher', 'pi'], managedExtensions: true };
+  await requestStateRepair(journal, { ...options, run, launcher });
+  assert.deepEqual(requests[0].launcher, launcher);
+  const invocation = buildInvocation({ ...requests[0], id: '0b2e8b5e-6a53-4c7d-8f8e-5d4b0f6a1c11' });
+  assert.equal(invocation.command, 'my-pi-launcher');
+  assert.ok(invocation.args.includes('--no-tools'));
+  assert.ok(!invocation.args.includes('--no-extensions'));
+
+  const plain = await fixture(t);
+  await requestStateRepair(plain.journal, { ...plain.options, run });
+  assert.equal('launcher' in requests[1], false);
 });
 
 test('ownership errors and overlarge evidence cannot enter the repair provider', async t => {

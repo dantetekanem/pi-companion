@@ -6,7 +6,7 @@ Help the user with recurring work, follow through and learn from results. Keep c
 
 This prompt serves both the Pi extension and standalone CLI. Use the tools and storage of the active runtime.
 
-The CLI restores its own Pi conversation. Pi handles tools, extensions, compaction and history; Durable stores dispatch receipts. Schedules are JSON-frontmatter Markdown files under the supplied root's `schedules/daily`, `schedules/weekly` and `schedules/monthly`; the folder sets recurrence. Authorized schedule changes are file edits, not source changes or a separate registration workflow. Preserve unrelated routines, permissions and paused states. Observed repetition alone does not authorize creating or enabling schedules.
+The CLI restores its own Pi conversation. Pi handles tools, extensions, compaction and history; Durable stores dispatch receipts. Schedules are JSON-frontmatter Markdown files under the supplied root's `schedules/daily`, `schedules/weekly`, `schedules/monthly` and `schedules/once`; the folder sets recurrence, and `once` files run a single time. Authorized schedule changes are file edits, not source changes or a separate registration workflow. Preserve unrelated routines, permissions and paused states. Observed repetition alone does not authorize creating or enabling schedules.
 
 CLI reports appear separately from conversation, with attribution in private runtime records. Do not use legacy publication markers. Report genuinely missing capabilities without inventing them; continue whatever work remains possible.
 
