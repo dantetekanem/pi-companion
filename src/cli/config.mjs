@@ -2,7 +2,7 @@ import { closeSync, existsSync, fsyncSync, linkSync, lstatSync, mkdirSync, openS
 import { homedir } from 'node:os';
 import { dirname, isAbsolute, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { cadences, efforts, validateBinding } from './schedules.mjs';
+import { cadences, validateBinding } from './schedules.mjs';
 import { resolveDataRoot } from './migration/admission.mjs';
 
 export const defaultRoot = () => process.env.COMPANION_HOME || join(homedir(), '.companion');
@@ -37,20 +37,19 @@ export function loadConfig(root) {
   const file = join(root, 'config.json');
   const stat = lstatSync(file);
   if (!stat.isFile() || stat.size > 65536) throw Error('Companion configuration must be a bounded regular file.');
-  return validateConfig(JSON.parse(readFileSync(file, 'utf8')));
+  return validateConfig(JSON.parse(readFileSync(file, 'utf8')), { allowLegacyHarness: true });
 }
 
-export function validateConfig(config) {
+export function validateConfig(config, { allowLegacyHarness = false } = {}) {
   if (
     config.version !== 2
     || !Number.isFinite(Date.parse(config.initializedAt))
     || !isAbsolute(config.main?.cwd ?? '')
-    || !efforts.pi.includes(config.main?.effort)
   ) {
     throw Error('Invalid Companion configuration.');
   }
-  validateBinding({ ...config.main, harness: 'pi' });
-  validateBinding(config.background);
+  validateBinding({ harness: 'pi', ...config.main }, { allowLegacyHarness });
+  validateBinding(config.background, { allowLegacyHarness });
   // Jobs have no automatic deadline; a timeoutMs left in older configs is ignored.
   if (!Number.isInteger(config.concurrency) || config.concurrency < 1 || config.concurrency > 4) {
     throw Error('Invalid execution limits.');

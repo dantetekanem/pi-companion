@@ -69,13 +69,22 @@ test('updates all Pi conversation and schedule bindings without touching unrelat
   assert.deepEqual(result.activeRuntime, { status: 'verified', effective: { model: 'openai-codex/gpt-6-luna', effort: 'xhigh' } });
 });
 
-test('rejects a model update crossing into a Claude target before changing any files', async t => {
+test('saved Claude background model and effort updates stay unchanged; native bindings fail preflight', async t => {
   const root = fixture(t, { harness: 'claude', model: 'sonnet', effort: 'high' });
-  const path = schedule(root, 'claude', { harness: 'claude', model: 'sonnet', effort: 'high' }); const before = [readFileSync(join(root, 'config.json'), 'utf8'), readFileSync(path, 'utf8')];
+  const before = readFileSync(join(root, 'config.json'), 'utf8');
   let applied = false;
-  const result = await updateSettings(root, { scope: 'all', model: 'openai-codex/gpt-6-luna' }, { modelRuntime, applyCurrent: () => { applied = true; } });
-  assert.deepEqual([result.persisted.status, result.incompatibleScopes, result.activeRuntime.status, result.unchangedScopes], ['unchanged', ['background', 'schedules:claude'], 'unchanged', ['main']]);
-  assert.deepEqual([readFileSync(join(root, 'config.json'), 'utf8'), readFileSync(path, 'utf8')], before);
+  const runtime = { modelRuntime, applyCurrent: () => { applied = true; } };
+  for (const patch of [{ model: 'openai-codex/gpt-6-luna' }, { effort: 'high' }]) {
+    const result = await updateSettings(root, { scope: 'background', ...patch }, runtime);
+    assert.deepEqual([result.persisted.status, result.incompatibleScopes, result.activeRuntime.status], ['unchanged', ['background'], 'unchanged']);
+    assert.equal(readFileSync(join(root, 'config.json'), 'utf8'), before);
+  }
+  const path = schedule(root, 'claude', { harness: 'claude', model: 'sonnet', effort: 'high' });
+  const nativeBefore = readFileSync(path, 'utf8');
+  await assert.rejects(updateSettings(root, { scope: 'all', effort: 'high' }, runtime), /invalid native/i);
+  assert.equal(readFileSync(join(root, 'config.json'), 'utf8'), before);
+  assert.equal(readFileSync(path, 'utf8'), nativeBefore);
+  assert.equal(applied, false);
 });
 
 test('reports persisted bindings separately when the active-session setter fails', async t => {

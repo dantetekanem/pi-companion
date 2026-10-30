@@ -14,7 +14,7 @@ const base = {
   timezone: 'UTC',
   enabled: true,
   cadence: 'daily',
-  harness: 'claude',
+  harness: 'pi',
   model: 'test',
   effort: 'high',
   context: [],
@@ -86,6 +86,19 @@ test('harness previews bind to occurrence IDs, not fresh harness UUIDs, and obse
   await h.runtime.idle();
   assert.deepEqual(seen, [['check:2026-01-02', { type: 'message_update' }]]);
   assert.equal(h.runtime.data.runs['check:2026-01-02'].status, 'completed');
+});
+
+test('native dispatch rejects an explicit non-Pi binding before admission', async t => {
+  const h = await fixture(t);
+  const runner = new CompanionRunner({
+    ...h, config,
+    runHarness: async () => { throw Error('Unexpected provider dispatch'); },
+  });
+  await assert.rejects(
+    runner.startNative({ ...h.schedule, harness: 'claude' }, {}, h.runtime.data),
+    /explicit Pi binding/,
+  );
+  assert.deepEqual(h.runtime.data.runs, {});
 });
 
 test('local calendar occurrences skip missing times and use the first repeated instant', () => {
@@ -335,7 +348,9 @@ test('tick returns before completion, deduplicates and exposes durable full repo
       dispatched = request;
       assert.equal(fixtureData.runtime.data.runs['check:2026-04-27'].status, 'running');
       assert.match(request.id, /^[0-9a-f-]{36}$/);
-      assert.equal(request.harness, 'claude');
+      assert.equal(request.harness, 'pi');
+      assert.equal(request.sessionFile, join(fixtureData.root, 'jobs', `${request.id}.jsonl`));
+      assert.equal(fixtureData.runtime.data.runs['check:2026-04-27'].harness, 'pi');
       assert.equal(request.model, 'test');
       assert.equal(request.effort, 'high');
       return new Promise(resolve => { finish = resolve; });
@@ -357,7 +372,7 @@ test('tick returns before completion, deduplicates and exposes durable full repo
   const envelope = JSON.parse(dispatched.prompt);
   assert.deepEqual(envelope.scope, {
     cwd: fixtureData.root,
-    harness: 'claude',
+    harness: 'pi',
     model: 'test',
     sources: ['source'],
   });

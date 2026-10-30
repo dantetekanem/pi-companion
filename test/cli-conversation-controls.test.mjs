@@ -7,12 +7,14 @@ import { createAgentSession, ModelRuntime, SettingsManager } from '@earendil-wor
 import { createAssistantMessageEventStream } from '@earendil-works/pi-ai';
 import { initialize } from '../src/cli/config.mjs';
 import { openPiSession } from '../src/cli/pi-session.mjs';
+import { isolatePiHome } from './helpers/pi-session.mjs';
 import { CompanionRuntime } from '../src/cli/runtime.mjs';
 import { UsageLedger } from '../src/cli/usage.mjs';
 
 // Real SDK, session storage and Durable; no authentication/network or executable external tools.
 async function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'companion-controls-'));
+  isolatePiHome(t, join(root, 'agent'));
   const config = initialize(root, { cwd: root });
   const model = {
     id: 'local', provider: 'fixture', name: 'Synthetic', api: 'openai-completions',

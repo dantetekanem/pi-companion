@@ -142,10 +142,11 @@ test('dashboard paints before connection, wires sends and restores terminal on s
   await assert.rejects(main(['--home', h.root], h.output, {
     signals: h.signals,
     input: { isTTY: true },
-    startDashboard: (view, handlers) => {
+    startDashboard: (view, handlers, options) => {
       painted = true;
       assert.equal(view.connection, 'offline');
       assert.equal(typeof handlers.send, 'function');
+      assert.equal(options.theme.cwd, view.config.main.cwd);
       return { update() {}, askQuestion: request => request.choices[0].value, stop() { stopped = true; } };
     },
     openApplication: async (_root, options) => {

@@ -6,7 +6,7 @@ import { BACKGROUND_CONTEXT } from '@earendil-works/chord/context';
 import { createModels } from '@earendil-works/pi-ai';
 import { createRegistry, defineDoc, Harness } from '@earendil-works/pi-durable';
 import { openNodeSqliteStorage } from '@earendil-works/pi-durable/storage/sqlite/node';
-import { openPiSession, withPiCancellation } from './pi-session.mjs';
+import { closePiSession, openPiSession, withPiCancellation } from './pi-session.mjs';
 import { assertRuntimeAdmission } from './migration/admission.mjs';
 import { saveReport } from './reports.mjs';
 
@@ -136,17 +136,17 @@ export class CompanionRuntime {
       triggerSchedule: (scheduleId, callId, signal) => this.triggerSchedule(scheduleId, `${this.main.sessionId}:${callId}`, signal),
     });
     if (this.closing || this.fault) {
-      main.dispose();
+      await closePiSession(main);
       this.check();
     }
     if (!main.sessionId || !main.sessionFile
       || (saved && (saved.sessionId !== main.sessionId || saved.sessionFile !== main.sessionFile))) {
-      main.dispose();
+      await closePiSession(main);
       throw Error('Main Pi session identity is unavailable or changed.');
     }
     if (fresh && currentState.main
       && (currentState.main.sessionId === main.sessionId || currentState.main.sessionFile === main.sessionFile)) {
-      main.dispose();
+      await closePiSession(main);
       throw Error('A fresh main session must have a new identity and transcript.');
     }
 
@@ -179,7 +179,7 @@ export class CompanionRuntime {
       });
     } catch (error) {
       unsubscribe?.();
-      main.dispose();
+      await closePiSession(main);
       throw error;
     }
 
@@ -189,7 +189,7 @@ export class CompanionRuntime {
     this.unsubscribe = unsubscribe;
     if (fresh) this.lastCompaction = null;
     unsubscribePrevious?.();
-    if (previous && previous !== main) previous.dispose();
+    if (previous && previous !== main) await closePiSession(previous);
     this.notify();
     return main;
   }
@@ -419,6 +419,7 @@ export class CompanionRuntime {
     };
     this.mainTurn = turn;
     let preflight;
+    let disposition;
     const work = this.dispatch({
       id,
       kind: 'main',
@@ -431,15 +432,25 @@ export class CompanionRuntime {
     }, async signal => {
       try {
         await withPiCancellation(session, signal, () => session.prompt(text, {
-          preflightResult: ok => {
-            // SDK 0.85.1 calls this synchronously before starting the agent.
-            signal.throwIfAborted();
-            preflight = ok;
-            turn.preflight = ok;
-            if (ok) accepted.resolve({ id });
-            else accepted.reject(Error('Message rejected before submission.'));
+          preflightResult: result => {
+            disposition = result;
+            preflight = result !== false;
+            turn.preflight = preflight;
+            if (signal.aborted) {
+              // Throwing here bypasses Pi's settlement cleanup after it has started the run.
+              void session.abort().catch(() => {});
+              accepted.reject(signal.reason);
+            } else if (preflight) {
+              accepted.resolve({ id });
+            } else {
+              accepted.reject(Error('Message rejected before submission.'));
+            }
           },
         }));
+        if (disposition === 'handled') {
+          return { status: 'completed', cost: costOf(session), text: '' };
+        }
+        if (disposition === 'queued') await session.waitForIdle();
         const last = session.messages.filter(message => message.role === 'assistant').at(-1);
         return {
           status: last?.stopReason === 'stop' ? 'completed' : 'incomplete',
@@ -496,7 +507,7 @@ export class CompanionRuntime {
         await this.main?.abort();
         await Promise.allSettled([this.mainWork, ...[...this.active.values()].map(item => item.completion)]);
         this.unsubscribe?.();
-        this.main?.dispose();
+        await closePiSession(this.main);
         await this.harness.close(context);
         await this.release();
       })();

@@ -7,6 +7,7 @@ import { readSource } from './inventory.mjs';
 /** Preserve executable model identities before declaring the complete schedule set ready. */
 export async function importBindings(journal, { config, sessions, schedules, reviewSettings }) {
   const result = { ...config, main: { ...config.main }, legacySessions: {}, legacyReviews: {} };
+  for (const review of Object.values(config.legacyReviews ?? {})) validateBinding({ harness: 'pi', ...review });
   const references = journal.record.manifest.references.filter(item => item.kind === 'review-settings');
   let originalReview;
   if (reviewSettings) {
@@ -18,6 +19,7 @@ export async function importBindings(journal, { config, sessions, schedules, rev
       throw Error('Pinned review binding source changed or is invalid.');
     }
     const value = settings.favoriteModels?.['read-critical'];
+    validateBinding({ harness: 'pi', ...value, effort: value?.thinking });
     originalReview = { model: value?.model, effort: value?.thinking };
   } else if (references.length) throw Error('The original review binding needs an exact settings pin.');
   const pins = new Map(sessions.map(session => [session.sessionId, session]));
@@ -42,7 +44,7 @@ export async function importBindings(journal, { config, sessions, schedules, rev
     if (wrapper.role !== 'daily-wake') continue;
     const review = config.legacyReviews?.[id] ?? originalReview;
     if (!review || typeof review.model !== 'string' || !/^[^/\s]+\/\S+$/.test(review.model)) throw Error('Daily wake requires its original or explicitly selected review binding.');
-    validateBinding({ ...review, harness: 'pi' });
+    validateBinding({ harness: 'pi', ...review });
     if (originalReview && !isDeepStrictEqual(review, originalReview)) throw Error('Selected review binding differs from the pinned original.');
     if (review.model.split('/')[0] !== binding.model.split('/')[0]) throw Error('Review binding cannot disclose this origin to a different provider.');
     result.legacyReviews[id] = { model: review.model, effort: review.effort };

@@ -48,7 +48,7 @@ export function collectSessionPatterns(selection = {}) {
   const { consent, sources, from, to, excludeFiles = [], excludeText = [] } = selection;
   const start = Date.parse(from);
   const end = Date.parse(to);
-  if (!['pi', 'claude'].includes(consent.harness) || (consent.model != null && typeof consent.model !== 'string')
+  if (consent.harness !== 'pi' || (consent.model != null && typeof consent.model !== 'string')
     || !Number.isFinite(start) || !Number.isFinite(end) || start > end) {
     throw Error('Explicit provider scope and valid date window are required.');
   }

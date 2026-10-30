@@ -4,8 +4,8 @@ import { mkdtempSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, sy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { initialize, loadConfig } from '../src/cli/config.mjs';
-import { parseSchedule, loadSchedules, formatSchedule } from '../src/cli/schedules.mjs';
+import { initialize, loadConfig, validateConfig } from '../src/cli/config.mjs';
+import { parseSchedule, loadSchedules, formatSchedule, validateBinding } from '../src/cli/schedules.mjs';
 
 function fixture(t) {
   const root = mkdtempSync(join(tmpdir(), 'companion-cli-'));
@@ -42,6 +42,22 @@ test('initialization is model-free, private, repeatable and does not replace edi
   assert.deepEqual(initialize(root, { cwd: '/different', now: '2027-01-01T00:00:00.000Z' }), saved);
   assert.deepEqual(loadConfig(root), saved);
   assert.equal(loadSchedules(root).schedules.length, 0);
+});
+
+test('active binding validation rejects legacy harnesses while saved config reads preserve identities', t => {
+  const root = fixture(t);
+  const config = initialize(root, { cwd: root });
+  validateBinding({ harness: 'pi', model: 'anthropic/claude-sonnet', effort: 'xhigh' });
+  assert.throws(() => validateBinding({ harness: 'claude', effort: 'max' }), /harness.*pi/);
+  assert.throws(() => validateBinding({ harness: 'pi', effort: 'max' }), /effort/);
+  for (const target of ['main', 'background']) {
+    const saved = { ...config, [target]: { ...config[target], harness: 'claude', effort: 'max' } };
+    const bytes = JSON.stringify(saved);
+    writeFileSync(join(root, 'config.json'), bytes);
+    assert.throws(() => validateConfig(saved), /harness.*pi/);
+    assert.deepEqual(loadConfig(root), saved);
+    assert.equal(readFileSync(join(root, 'config.json'), 'utf8'), bytes);
+  }
 });
 
 test('legacy admission blocks fresh initialization without reading or mutating the legacy source', t => {
@@ -141,11 +157,16 @@ test('loader reports per-file errors and rejects every conflicting ID or symlink
   writeFileSync(join(root, 'schedules/daily/broken.md'), 'not metadata');
   writeFileSync(join(root, 'schedules/monthly/valid.md'), file({ id: 'monthly', day: 1 }));
   symlinkSync(join(root, 'schedules/monthly/valid.md'), join(root, 'schedules/daily/link.md'));
+  const legacyPath = join(root, 'schedules/daily/legacy.md');
+  const legacy = file({ id: 'legacy', harness: 'claude', effort: 'max' });
+  writeFileSync(legacyPath, legacy);
 
   const result = loadSchedules(root);
 
   assert.deepEqual(result.schedules.map(item => item.id), ['monthly']);
-  assert.equal(result.errors.length, 4);
+  assert.equal(result.errors.length, 5);
+  assert.match(result.errors.find(item => item.path === legacyPath).message, /harness.*pi/);
+  assert.equal(readFileSync(legacyPath, 'utf8'), legacy);
   assert.ok(result.errors.every(item => item.path && item.message));
   assert.deepEqual(result.counts, { daily: 0, weekly: 0, monthly: 1 });
 });

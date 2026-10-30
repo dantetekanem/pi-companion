@@ -10,9 +10,9 @@ Upgrading must carry forward all Companion-owned state once. The legacy inventor
 
 ## Terminal experience
 
-Use the installed Pi TUI directly in a separate Node process. Reports take most of the screen. A compact header shows daily, weekly and monthly schedule counts, selected background harness/model/effort, connection state, and recorded USD cost since initialization. Show unknown coverage beside cost, not as zero.
+Use the installed Pi TUI directly in a separate Node process. Reports take most of the screen. A compact header shows the view tabs with report and schedule counts, plus connection state; a bottom status bar shows the main Pi model/effort, context usage, and estimated USD cost since initialization or the last `/reset`. Accounting diagnostics stay internal rather than appearing as dashboard counters.
 
-At 100 or more columns, a right rail shows upcoming checks and running/error state. At 70–99 columns, use a single column and a compact status strip. Smaller terminals lose decoration rather than errors or send status. An extremely small terminal gets a finite resize hint. Use width-aware wrapping for Unicode and strip terminal controls from external content.
+Chat and reports use the full reading width without a side bar. The header and footer carry connection and schedule status. Smaller terminals lose decoration rather than errors or send status. An extremely small terminal gets a finite resize hint. Use width-aware wrapping for Unicode and strip terminal controls from external content.
 
 Keep the composer visible. Report navigation and conversation reading are separate views; sending a message makes the reply easy to find without turning every ordinary conversation turn into a published report. Tab changes focus; arrow keys and PageUp/PageDown navigate the focused list/body; slash enters the composer; Escape leaves it without erasing the draft. Editor shortcuts own input while typing. Failed sends retain the draft; accepted-but-interrupted sends are shown as uncertain and are not silently retried. Help shows the available keys.
 
@@ -22,9 +22,9 @@ Render cached local state before initializing the model runtime. Network work an
 
 ## Schedule files
 
-Use one editable Markdown file per schedule under `schedules/daily`, `schedules/weekly`, or `schedules/monthly`. A strict JSON metadata block carries machine settings; the body contains short instructions. JSON avoids adding a YAML parser and is easy to validate without a model. The folder determines recurrence. Files carry stable IDs, a local time, an IANA timezone, weekly weekday or monthly day when needed, enabled state, harness/model/effort, working directory, and explicit context/source references.
+Use one editable Markdown file per schedule under `schedules/daily`, `schedules/weekly`, or `schedules/monthly`. A strict JSON metadata block carries machine settings; the body contains short instructions. JSON avoids adding a YAML parser and is easy to validate without a model. The folder determines recurrence. Files carry stable IDs, a local time, an IANA timezone, weekly weekday or monthly day when needed, enabled state, the Pi harness and model/effort binding, working directory, and explicit context/source references.
 
-Initialization creates these folders and short instructions without submitting a model turn. Examples start disabled. Validation reports a broken file by path; a malformed or changed definition cannot acquire authority from an earlier cached version. No agent is needed to register a valid enabled file.
+Initialization creates these folders and short instructions without submitting a model turn. Examples start disabled. Validation reports a broken file by path; a malformed or changed definition cannot acquire authority from an earlier cached version. An old schedule still bound to the native Claude harness remains on disk with a per-file parse error and is excluded from execution. Saved config and history remain readable. No agent is needed to register a valid enabled file.
 
 Recurrence uses local calendar dates, not a fixed 24-hour interval. A repeated local time during a daylight-saving transition is one occurrence; a nonexistent time is not guessed. A monthly day absent from a month is skipped. Stable occurrence IDs prevent repeat dispatch. Missed periods do not cause an unbounded catch-up burst. Migration must preserve original cadence semantics through an explicit compatibility representation where calendar shorthand is insufficient, including intervals, one-time work and irregular cron. Folder placement must not reinterpret timing. Conversion errors block cutover; a bounded repair agent may propose a staged correction, which must pass the same checks before migration continues.
 
@@ -32,9 +32,7 @@ Recurrence uses local calendar dates, not a fixed 24-hour interval. A repeated l
 
 The main Pi session uses the supported installed SDK with an explicit SessionManager and a Companion-owned session path. The configured Pi environment supplies ordinary tools and context for the user's direct messages. Startup and initialization do not issue a model request.
 
-Background Pi and Claude invocations have distinct identities and a bounded context envelope: schedule instructions, explicit source permissions, selected relevant notes, latest outcome, and the report contract. They do not inherit the main transcript. Start with read-only check tools and explicit workspace/provider scope. A harness is not an OS sandbox; no documentation may imply otherwise. Broader unattended actions require an explicit supported permission contract rather than an instruction hidden in a prompt.
-
-Use exact process argument arrays, not shell command strings. Consume machine output with bounded LF-delimited framing, deadlines and cancellation. A final result and exit status determine the outcome; a successful spawn does not. Keep stdout/stderr and terminal controls out of the UI except for bounded, sanitized diagnostics. Claude `--continue` is not a job identity; use an exact saved session ID when resumption is supported.
+Background jobs run in ordinary Pi sessions with per-job identities and the schedule's Pi model/effort binding. They receive the schedule instructions, named context files and a bounded previous outcome, not the main transcript. Live public output uses Pi's native SDK/RPC stream as plain Markdown; child-specific renderers and replay after reconnect are not guaranteed. Cancellation aborts owned Pi work. Companion imposes no execution deadline, fixed report contract or read-only tool gate; the configured Pi environment determines available tools. Anthropic/Claude models remain available through Pi, but the CLI does not invoke a Claude executable. This is not an OS sandbox.
 
 Reserve a stable dispatch in durable storage before a model/tool-producing action. Save receipts and results before reporting completion. After a crash, an admitted dispatch without a conclusive receipt is interrupted/unknown, not eligible for automatic replay. Cancellation must terminate and reap owned children, not merely stop awaiting them. Do not promise exactly-once external effects or power-loss durability from SQLite WAL with synchronous NORMAL.
 
@@ -42,7 +40,7 @@ Reserve a stable dispatch in durable storage before a model/tool-producing actio
 
 Reports render inside the CLI. Publication attribution stays in private runtime records; user-facing text contains no Companion tracking comments. A result distinguishes findings, no change, failed, incomplete and not run. Completed work, delivered reports, user reading and usefulness are different facts. No-news runs may save their outcome without publishing a noisy report.
 
-The initial session-review prompt offers a bounded review of explicitly selected sources, dates, exclusions and provider scope. Declining it still leaves a usable CLI. Extract dated user requests and observed workflow evidence, not entire tool transcripts. Surface frequent manual requests, known underused workflows, and daily/weekly/monthly repetitions as automation candidates. Counts describe inspected coverage; lack of evidence is not proof that a workflow is unused. Repetition does not authorize access or actions.
+The initial session-review prompt can review only explicitly selected Pi or Claude JSONL sources, dates and exclusions. Submission always uses a selected model/effort through Pi; this can be an Anthropic/Claude model supported by Pi. Declining it still leaves a usable CLI. Extract dated user requests and observed workflow evidence, not entire tool transcripts. Surface frequent manual requests, known underused workflows, and daily/weekly/monthly repetitions as automation candidates. Counts describe inspected coverage; lack of evidence is not proof that a workflow is unused. Repetition does not authorize access or actions.
 
 Taste and learning use relevant bounded notes with provenance. Historical messages, tool output and imported reports are data, not new instructions. Reflection proposes reversible changes with a benefit and an observable success signal; the runtime/user's permission contract decides what may be applied. Explicit stops override learning and silence is not rejection.
 
@@ -76,26 +74,23 @@ The active pointer is insufficient by itself: the matching journal must be verif
 
 Persist the initialization timestamp and per-source accounting identity. Pi session statistics include historical and compacted/branched usage, so adoption needs an initial baseline for that exact session. Switching sessions creates a separate segment. Fresh job sessions have their own receipts.
 
-Claude's documented `total_cost_usd` is cumulative for a resumed session. Store the last accepted cumulative observation and add only its delta; never sum repeated cumulative results. Deduplicate receipts across reloads and do not count nested cost twice. Mark missing/aborted results as unknown coverage. Display client estimates as estimates, not provider invoices or subscription spending. Durable-owned usage, when present, is a distinct source rather than a substitute for external Pi/Claude cost.
+Pi session statistics provide cumulative cost observations for current conversations and checks. Store the last accepted observation per Pi session and add only its delta; deduplicate receipts across reloads and do not count nested cost twice. Mark missing or aborted results as unknown coverage. Imported historical Claude cost records remain readable and separate from current Pi usage. A Claude model selected through Pi is accounted as a Pi session; the CLI does not invoke a Claude executable or add new Claude CLI receipts. Display client estimates as estimates, not provider invoices or subscription spending. Durable-owned usage, when present, is a distinct source from Pi session estimates.
 
 ## Compatibility evidence
 
-This checkout has coding-agent and TUI 0.85.1, with Durable and top-level pi-ai 1.1.0. The host Pi documentation is 1.4.0 and is not proof of the local SDK's API. Use actual declarations rather than the stale `continueSession` example in the local SDK comments. No dependency install or upgrade has been authorized.
-
-Local Claude reports 2.1.311. Its help confirms structured print output, exact session IDs/resume, model/effort, tool allowlists, restricted mode, safe mode and permission-prompt controls. Help inspection is not a live-provider integration test.
+This checkout targets coding-agent and TUI 1.4.0, with Durable 1.1.0. The main session loads Pi's built-in codemode, tool search and MCP extensions alongside configured extensions, then binds their lifecycle through the supported SDK. Startup, cancellation during preflight, reset and shutdown are checked against the installed SDK rather than inferred from another Pi host.
 
 New CLI modules will be plain ESM `.mjs` so the installed executable does not depend on Node stripping TypeScript from node_modules or an undeclared transpiler. Existing extension TypeScript stays in place. Reuse installed Pi TUI; avoid adding React or changing the supported Node runtime for a second UI framework.
 
 ## Research sources
 
-- [Pi TUI exports](https://github.com/earendil-works/pi/blob/main/packages/tui/src/index.ts), checked against installed 0.85.1 README/types and Pi TUI guidance.
+- [Pi TUI exports](https://github.com/earendil-works/pi/blob/main/packages/tui/src/index.ts), initially checked against 0.85.1; current integration uses the installed 1.4.0 API.
 - [Lazygit configuration](https://raw.githubusercontent.com/jesseduffield/lazygit/master/docs/Config.md): focus indicators, panel navigation and contextual key help.
 - [Ink README](https://raw.githubusercontent.com/vadimdemedes/ink/master/readme.md): a viable React approach, but adds a framework absent here; master documents upcoming behavior.
 - [OpenTUI core](https://raw.githubusercontent.com/anomalyco/opentui/main/packages/core/README.md): current runtime/native requirements do not fit this package's Node 22.19 baseline without changing distribution.
 - [Bubble Tea](https://raw.githubusercontent.com/charmbracelet/bubbletea/main/README.md): state/update/view and alternate-screen reference, not a Node dependency choice.
-- Installed Pi 0.85.1 SDK, SessionManager, AgentSession and RPC declarations/docs: actual session ownership and statistics contracts.
+- Installed Pi 1.4.0 SDK, SessionManager, AgentSession and RPC declarations/docs: session ownership, extension lifecycle and statistics contracts.
 - Installed Pi Durable 1.1.0 README and Harness/task/tool declarations: separate runtime, phase checkpoints, explicit replay policy and storage limitations.
-- Claude [CLI reference](https://code.claude.com/docs/en/cli-reference), [headless use](https://code.claude.com/docs/en/headless), [permissions](https://code.claude.com/docs/en/permissions) and [costs](https://code.claude.com/docs/en/costs), cross-checked with installed help where possible.
 
 ## Verification and delivery limits
 

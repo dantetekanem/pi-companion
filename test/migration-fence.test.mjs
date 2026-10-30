@@ -22,6 +22,24 @@ function fixture(t) {
   return { root, controlRoot };
 }
 
+test('distinct owners can start and drain concurrently without weakening session exclusivity', async t => {
+  const { root, controlRoot } = fixture(t);
+  const identities = [identity, { sessionId: 'second-owner', sessionFile: '/synthetic/second.jsonl' }];
+  const opened = await Promise.allSettled(identities.map(item => LegacyOwner.open(root, item, { controlRoot })));
+  const owners = opened.filter(result => result.status === 'fulfilled').map(result => result.value);
+  t.after(async () => {
+    for (const owner of owners) await owner.close(async () => {});
+  });
+  assert.equal(owners.length, 2, 'both distinct sessions acquire their own owner');
+  await assert.rejects(LegacyOwner.open(root, identity, { controlRoot }), { code: 'ELOCKED' });
+  const fenced = { ...migration, owners: identities };
+  await installLegacyFence(root, fenced, { controlRoot });
+  await Promise.all(owners.map(owner => owner.close(async () => {})));
+  const receipt = await collectShutdownReceipt(root, fenced, { controlRoot });
+  assert.deepEqual(receipt.sessions.map(item => item.sessionId), identities.map(item => item.sessionId));
+  assert.ok(receipt.sessions.every(item => item.basis === 'extension-shutdown'));
+});
+
 test('a fence blocks new owners and a running owner cannot masquerade as a shutdown receipt', async t => {
   const { root, controlRoot } = fixture(t);
   const owner = await LegacyOwner.open(root, identity, { controlRoot });

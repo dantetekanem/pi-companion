@@ -6,6 +6,7 @@ import { migrationFixture } from './helpers/migration.mjs';
 import { runUpgrade } from '../src/cli/migration/cutover.mjs';
 import { sha256 } from '../src/cli/migration/inventory.mjs';
 import { loadConfig } from '../src/cli/config.mjs';
+import { importBindings } from '../src/cli/migration/bindings.mjs';
 
 test('missing or cross-provider execution bindings block migration before scheduler cutover', async t => {
   for (const mode of ['missing-session', 'missing-review', 'different-provider']) {
@@ -17,6 +18,49 @@ test('missing or cross-provider execution bindings block migration before schedu
     await assert.rejects(runUpgrade(h.journal, h.options), /binding|provider/i);
     assert.equal(existsSync(join(h.root, 'active.json')), false);
     assert.equal(JSON.parse(readFileSync(h.schedulerFile, 'utf8')).revision, 4);
+  }
+});
+
+test('explicit non-Pi selected and pinned review identities reject before import projection', async t => {
+  for (const mode of ['selected', 'pinned']) {
+    const references = [];
+    let pin;
+    const h = await migrationFixture(t, {
+      references,
+      mutateTasks(_tasks, { selection }) {
+        if (mode !== 'pinned') return;
+
+        const path = join(dirname(selection.sessionFile), 'review-settings.json');
+        const settings = {
+          favoriteModels: {
+            'read-critical': {
+              harness: 'claude',
+              model: 'fixture/reviewer',
+              thinking: 'high',
+            },
+          },
+        };
+        const bytes = Buffer.from(JSON.stringify(settings));
+        writeFileSync(path, bytes);
+        pin = { path, size: bytes.length, sha256: sha256(bytes) };
+        references.push({ kind: 'review-settings', path });
+      },
+    });
+    const id = h.options.sessions[0].sessionId;
+    if (mode === 'selected') h.options.config.legacyReviews[id].harness = 'claude';
+    let writes = 0;
+    const journal = { record: h.journal.record, writeData: () => { writes++; } };
+    await assert.rejects(
+      importBindings(journal, {
+        ...h.options,
+        schedules: { artifacts: [] },
+        reviewSettings: pin,
+      }),
+      /harness.*pi/,
+    );
+    assert.equal(writes, 0);
+    assert.equal(JSON.parse(readFileSync(h.schedulerFile, 'utf8')).revision, 4);
+    assert.equal(existsSync(h.options.controlRoot), false);
   }
 });
 

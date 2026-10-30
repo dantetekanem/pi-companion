@@ -56,7 +56,7 @@ process.stdin.on('data', chunk => {
     } else if (cmd.type === 'set_auto_retry' || cmd.type === 'set_auto_compaction') {
       reply();
     } else if (cmd.type === 'prompt') {
-      reply();
+      reply({ disposition: 'started' });
       ${body}
     } else if (cmd.type === 'abort') {
       reply();
@@ -72,14 +72,8 @@ test('harness argv keeps job identity controls and prompt text off the command l
   assert.ok(!pi.args.includes('--model'));
   assert.equal(pi.args[pi.args.indexOf('--thinking') + 1], 'medium');
   assert.equal(pi.args[pi.args.indexOf('--mode') + 1], 'rpc');
-  const claude = buildInvocation(request(t, 'claude'));
-  assert.ok(claude.args.includes('--safe-mode'));
-  assert.ok(claude.args.includes('--restricted'));
-  assert.ok(claude.args.includes('--strict-mcp-config'));
-  assert.equal(claude.args[claude.args.indexOf('--permission-mode') + 1], 'dontAsk');
-  assert.equal(claude.args[claude.args.indexOf('--session-id') + 1], id);
-  assert.ok(!claude.args.includes('--continue'));
-  assert.ok(!claude.args.some(value => value.includes('quoted')));
+  assert.ok(!pi.args.some(value => value.includes('quoted')));
+  assert.throws(() => buildInvocation(request(t, 'claude')), /Pi/);
 });
 
 test('migrated delivery uses ordinary Pi defaults for compatibility checks', async t => {
@@ -104,7 +98,7 @@ test('purpose-specific jobs keep their disabled tools and cannot change harness 
     assert.ok(invocation.args.includes('--no-context-files'));
     assert.ok(invocation.args.includes('--no-approve'));
     assert.ok(invocation.args.includes('--system-prompt'));
-    if (purpose !== 'session-patterns') assert.throws(() => buildInvocation({ ...request(t, 'claude'), purpose }), /Pi/);
+    assert.throws(() => buildInvocation({ ...request(t, 'claude'), purpose }), /Pi/);
   }
   assert.throws(() => buildInvocation({ ...request(t), purpose: 'unknown' }), /purpose/);
 });
@@ -142,12 +136,12 @@ test('Pi checks effective model and thinking before submission and returns sessi
 test('Pi RPC extension errors fail the run without discarding the completed answer', async t => {
   const result = await runHarness(request(t), { spawnProcess: fake(rpc(`
     send({ type: 'message_end', message: { role: 'assistant', stopReason: 'stop', content: [{ type: 'text', text: 'Answer retained' }] } });
-    send({ type: 'extension_error', extensionPath: '/extensions/teams.ts', event: 'agent_end', error: 'child still active' });
+    send({ type: 'extension_error', extensionPath: '/extensions/example.ts', event: 'agent_end', error: 'handler failed' });
     send({ type: 'agent_settled', aborted: true });
   `)) });
   assert.equal(result.status, 'failed');
   assert.equal(result.text, 'Answer retained');
-  assert.equal(result.error, 'child still active');
+  assert.equal(result.error, 'handler failed');
 });
 
 test('Pi RPC aborted settlement without an extension error is interrupted, not completed', async t => {
@@ -202,46 +196,30 @@ test('a mismatched Pi model fails before any prompt is submitted', async t => {
   assert.doesNotMatch(result.error, /PROMPT_WAS_SENT/);
 });
 
-test('Claude final cumulative result is authoritative; LF framing preserves Unicode and ignores partial cost', async t => {
-  const program = `
-    process.stdin.resume();
-    process.stdin.on('end', () => {
-      process.stdout.write(JSON.stringify({ type: 'assistant', usage: { cost: 999 } }) + '\\n');
-      const line = JSON.stringify({
-        type: 'result',
-        subtype: 'success',
-        is_error: false,
-        result: 'Ready \\u2029 now',
-        session_id: '${id}',
-        total_cost_usd: 1.75,
-      }) + '\\n';
-      process.stdout.write(line.slice(0, 40));
-      process.stdout.write(line.slice(40));
-    });
-  `;
-  const result = await runHarness(request(t, 'claude'), { spawnProcess: fake(program) });
-  assert.equal(result.status, 'completed');
-  assert.equal(result.text, 'Ready \u2029 now');
-  assert.equal(result.cost.usd, 1.75);
-  assert.equal(result.cost.cumulative, true);
-  assert.equal(result.freshSession, true);
+test('Pi handled prompts fail without waiting for settlement and reap the owned child', { timeout: 3000 }, async t => {
+  let child;
+  t.after(() => { if (child?.exitCode === null && child?.signalCode === null) child.kill('SIGKILL'); });
+  const result = await runHarness(request(t), {
+    spawnProcess: (...args) => {
+      child = fake(rpc('').replace("reply({ disposition: 'started' });", "reply({ disposition: 'handled' });"))(...args);
+      return child;
+    },
+  });
+  assert.equal(result.status, 'failed');
+  assert.match(result.error, /Pi handled the prompt without starting an assistant response/);
+  assert.equal(result.text, '');
+  assert.equal(result.cost, null);
+  assert.equal(result.noModel, undefined);
+  assert.notEqual(child.signalCode ?? child.exitCode, null);
 });
 
-test('Claude refuses a final result attributed to a different conversation', async t => {
-  const program = `
-    process.stdin.resume();
-    process.stdin.on('end', () => console.log(JSON.stringify({
-      type: 'result',
-      subtype: 'success',
-      result: 'Wrong session',
-      session_id: 'd9d7e7d4-ef05-4e1a-a61e-a30102297dd1',
-      total_cost_usd: 9,
-    })));
-  `;
-  const result = await runHarness(request(t, 'claude'), { spawnProcess: fake(program) });
-  assert.equal(result.status, 'failed');
-  assert.equal(result.cost, null);
-  assert.match(result.error, /identity/);
+test('Pi accepts older prompt replies without a disposition', async t => {
+  const result = await runHarness(request(t), { spawnProcess: fake(rpc(`
+    send({ type: 'message_end', message: { role: 'assistant', stopReason: 'stop', content: [{ type: 'text', text: 'Older reply' }] } });
+    send({ type: 'agent_settled' });
+  `).replace("reply({ disposition: 'started' });", "reply();")) });
+  assert.equal(result.status, 'completed');
+  assert.equal(result.text, 'Older reply');
 });
 
 test('missing, malformed, failed or oversized results never become zero-cost success', async t => {
@@ -249,11 +227,11 @@ test('missing, malformed, failed or oversized results never become zero-cost suc
     "process.exit(0)",
     "console.log('{broken')",
     "process.stderr.write('denied');process.exit(2)",
-    "console.log(JSON.stringify({type:'result',is_error:true,result:'Permission denied'}))",
+    rpc("send({ type: 'message_end', message: { role: 'assistant', stopReason: 'error', content: [] } }); send({ type: 'agent_settled' });"),
     "console.log('x'.repeat(1025))",
   ];
   for (const program of failures) {
-    const result = await runHarness(request(t, 'claude'), { spawnProcess: fake(program), maxOutputBytes: 1024 });
+    const result = await runHarness(request(t), { spawnProcess: fake(program), maxOutputBytes: 1024 });
     assert.equal(result.status, 'failed');
     assert.equal(result.cost, null);
     assert.ok(result.error);
@@ -291,7 +269,7 @@ test('the output byte bound applies to each LF-delimited record, not to a long h
 test('cancellation terminates the owned child and leaves unknown cost, without retry', async t => {
   const aborted = new AbortController();
   const calls = [];
-  const result = await runHarness({ ...request(t, 'claude'), signal: aborted.signal }, {
+  const result = await runHarness({ ...request(t), signal: aborted.signal }, {
     spawnProcess: fake("console.log(JSON.stringify({type:'system'}));setInterval(()=>{},1000)", calls),
     onEvent: () => aborted.abort(),
   });

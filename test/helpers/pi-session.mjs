@@ -1,6 +1,15 @@
 import { join } from 'node:path';
 import { openPiSession } from '../../src/cli/pi-session.mjs';
 
+export function isolatePiHome(t, agentDir) {
+  const previous = process.env.PI_CODING_AGENT_DIR;
+  process.env.PI_CODING_AGENT_DIR = agentDir;
+  t.after(() => {
+    if (previous === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = previous;
+  });
+}
+
 /** Real SessionManager/resource loader; no provider, tools, private settings or network. */
 export function fakePi(root, controls = new Map()) {
   const sessions = new Map();
@@ -65,6 +74,7 @@ export function fakePi(root, controls = new Map()) {
           control.aborted = true;
           control.gate?.resolve();
         },
+        async bindExtensions() {},
         dispose() { control.disposed = true; },
       };
       controls.set(id, control);

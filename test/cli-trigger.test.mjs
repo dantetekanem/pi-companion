@@ -6,12 +6,14 @@ import { join } from 'node:path';
 import { initialize } from '../src/cli/config.mjs';
 import { CompanionApplication } from '../src/cli/application.mjs';
 import { openPiSession } from '../src/cli/pi-session.mjs';
+import { isolatePiHome } from './helpers/pi-session.mjs';
 import { CompanionRuntime } from '../src/cli/runtime.mjs';
 import { CompanionRunner } from '../src/cli/runner.mjs';
 import { createAgentSession, ModelRuntime, SettingsManager } from '@earendil-works/pi-coding-agent';
 
 async function fixture(t, runHarness) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'companion-trigger-')));
+  isolatePiHome(t, join(root, 'agent'));
   initialize(root, { cwd: root, now: '2026-01-01T00:00:00Z' });
   const file = join(root, 'schedules/daily/email.md');
   const schedule = {
@@ -21,8 +23,8 @@ async function fixture(t, runHarness) {
     window: { start: '09:00', end: '10:00', everyMinutes: 60 },
     timezone: 'UTC',
     cwd: root,
-    harness: 'claude',
-    model: 'fixture',
+    harness: 'pi',
+    model: 'fixture/local',
     effort: 'high',
     context: ['source'],
   };
@@ -74,11 +76,7 @@ async function fixture(t, runHarness) {
 }
 const outcome = {
   status: 'completed',
-  text: JSON.stringify({
-    outcome: 'no_change',
-    body: 'Checked fixture: nothing new',
-    checks: [{ source: 'fixture', outcome: 'no_change', detail: 'Checked' }],
-  }),
+  text: 'Checked fixture: nothing new',
 };
 
 test('exact-ID one-off is durable, asynchronous, replay-safe, visible and leaves paused settings intact', async t => {
@@ -87,9 +85,9 @@ test('exact-ID one-off is durable, asynchronous, replay-safe, visible and leaves
   let calls = 0;
   const h = await fixture(t, request => {
     calls++;
-    assert.equal(request.model, 'fixture');
+    assert.equal(request.model, 'fixture/local');
     assert.equal(request.effort, 'high');
-    assert.equal(request.harness, 'claude');
+    assert.equal(request.harness, 'pi');
     assert.match(request.prompt, /Explicit fixture context/);
     return done.promise;
   });
@@ -104,7 +102,7 @@ test('exact-ID one-off is durable, asynchronous, replay-safe, visible and leaves
   done.resolve(outcome);
   release();
   await h.app.runtime.idle();
-  assert.equal((await h.tool.execute('explicit-one', { scheduleId: 'email' })).details.status, 'no_change');
+  assert.equal((await h.tool.execute('explicit-one', { scheduleId: 'email' })).details.status, 'completed');
   assert.equal(calls, 1);
   const view = await h.app.refresh();
   assert.equal(view.reports.find(report => report.id === result.id).body, 'Checked fixture: nothing new');
@@ -126,7 +124,7 @@ test('one-offs do not consume calendar occurrences and reopened Durable receipts
   await h.app.runner.tick();
   await h.app.runtime.idle();
   assert.equal(calls, 2);
-  assert.equal((await h.app.runtime.state()).runs['email:2026-04-27'].status, 'no_change');
+  assert.equal((await h.app.runtime.state()).runs['email:2026-04-27'].status, 'completed');
   await h.app.close();
   const runtime = await CompanionRuntime.open(h.root, h.config);
   const runner = new CompanionRunner({
@@ -137,7 +135,7 @@ test('one-offs do not consume calendar occurrences and reopened Durable receipts
     runHarness: async () => { throw Error('Must not replay'); },
   });
   try {
-    assert.deepEqual(await runner.trigger('email', callId), { id: manual.id, status: 'no_change', replay: true });
+    assert.deepEqual(await runner.trigger('email', callId), { id: manual.id, status: 'completed', replay: true });
     await runner.tick();
     assert.equal(Object.keys((await runtime.state()).runs).length, 2);
   } finally {

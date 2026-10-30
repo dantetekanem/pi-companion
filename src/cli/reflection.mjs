@@ -50,7 +50,7 @@ export class DailyReflection {
     if (initial.reviews.some(review => review.day === day)) return quiet('This day already has a review receipt.');
     const conversation = await importedBinding(this.root, session.sessionId, this.config.legacySessions?.[session.sessionId]);
     const binding = this.config.legacyReviews?.[session.sessionId];
-    validateBinding({ ...binding, harness: 'pi' });
+    validateBinding({ harness: 'pi', ...binding });
     if (!binding?.model?.includes('/')) throw Error('Daily reflection needs its explicitly preserved review binding.');
     const provider = conversation.model.split('/')[0];
     if (binding.model.split('/')[0] !== provider) throw Error('Daily review cannot disclose evidence to a different provider.');

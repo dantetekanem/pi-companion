@@ -26,6 +26,7 @@ const pi = (id, content, timestamp = '2026-10-10T10:00:00Z') => ({ type: 'messag
 test('no opt-in reads nothing; explicit provider and date scope are required', () => {
   assert.deepEqual(collectSessionPatterns({ sources: [{ path: '/not/authorized' }] }), { status: 'not_requested' });
   assert.throws(() => collectSessionPatterns({ consent: { harness: 'other' }, sources: [], from: 'bad', to: 'bad' }), /scope|date|harness/);
+  assert.throws(() => collectSessionPatterns({ consent: { harness: 'claude', model: 'sonnet' }, sources: [], from: '2026-01-01', to: '2026-01-02' }), /scope|harness/);
 });
 
 test('Pi and Claude extract dated user-role requests and tool names, never tool arguments or assistant text', t => {

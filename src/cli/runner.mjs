@@ -205,13 +205,14 @@ export class CompanionRunner {
   }
 
   async startNative(schedule, occurrence, state, signal, onAdmitted) {
+    if (schedule.harness !== 'pi') throw Error('Execution requires an explicit Pi binding.');
     const previous = Object.values(state.runs)
       .filter(run => run.scheduleId === schedule.id && run.status !== 'running')
       .sort((a, b) => (b.scheduledAt ?? '').localeCompare(a.scheduledAt ?? ''))[0];
     const prompt = await buildContext(schedule, previous);
     const id = randomUUID();
     const directory = join(this.root, 'jobs');
-    if (schedule.harness === 'pi') await mkdir(directory, { recursive: true, mode: 0o700 });
+    await mkdir(directory, { recursive: true, mode: 0o700 });
     // Revalidate the complete folder after asynchronous preflight; stale definitions grant no authority.
     const fresh = loadSchedules(this.root);
     const current = fresh.schedules.find(item => item.id === schedule.id);
@@ -225,7 +226,7 @@ export class CompanionRunner {
       kind: 'background',
       scheduleId: schedule.id,
       title: schedule.title,
-      harness: schedule.harness,
+      harness: 'pi',
       model: schedule.model,
       effort: schedule.effort,
       cwd: schedule.cwd,
@@ -244,12 +245,12 @@ export class CompanionRunner {
       }
       return this.runHarness({
         id,
-        harness: schedule.harness,
+        harness: 'pi',
         cwd: schedule.cwd,
         model: schedule.model,
         effort: schedule.effort,
         prompt,
-        sessionFile: schedule.harness === 'pi' ? join(directory, `${id}.jsonl`) : undefined,
+        sessionFile: join(directory, `${id}.jsonl`),
         signal,
       }, { onEvent: event => this.onActivity(occurrence.id, event) });
     }, onAdmitted);

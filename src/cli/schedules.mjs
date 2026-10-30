@@ -5,15 +5,22 @@ import { parseCompatibility } from './legacy-schedules.mjs';
 export const cadences = ['daily', 'weekly', 'monthly'];
 export const efforts = {
   pi: ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'],
-  claude: ['low', 'medium', 'high', 'xhigh', 'max'],
 };
+const legacyClaudeEfforts = ['low', 'medium', 'high', 'xhigh', 'max'];
 const fields = new Set(['id', 'title', 'at', 'window', 'timezone', 'enabled', 'harness', 'model', 'effort', 'cwd', 'context', 'weekday', 'day']);
 const controls = /[\x00-\x08\x0b-\x1f\x7f-\x9f]/;
 const text = value => typeof value === 'string' && value.trim().length > 0 && !controls.test(value);
 
-export function validateBinding(binding) {
-  if (!binding || !Object.hasOwn(efforts, binding.harness)) throw Error('harness must be pi or claude');
-  if (!efforts[binding.harness].includes(binding.effort)) throw Error(`unsupported ${binding.harness} effort`);
+export function validateBinding(binding, { allowLegacyHarness = false } = {}) {
+  let supportedEfforts;
+  if (binding?.harness === 'pi') {
+    supportedEfforts = efforts.pi;
+  } else if (allowLegacyHarness && binding?.harness === 'claude') {
+    supportedEfforts = legacyClaudeEfforts;
+  } else {
+    throw Error('harness must be pi');
+  }
+  if (!supportedEfforts.includes(binding.effort)) throw Error(`unsupported ${binding.harness} effort`);
   if (binding.model != null && (!text(binding.model) || binding.model.startsWith('-') || binding.model.length > 200)) {
     throw Error('invalid model');
   }

@@ -154,10 +154,16 @@ test('review binding and stop state block disclosure, while interrupted admitted
       error: 'Synthetic interruption',
     };
   });
-  h.config.legacyReviews[h.input.session.sessionId].model = 'other/reviewer';
+  const id = h.input.session.sessionId;
+  h.config.legacyReviews[id].model = 'other/reviewer';
   await assert.rejects(h.reflection.review(h.input), /provider/);
   assert.equal(calls, 0);
-  h.config.legacyReviews[h.input.session.sessionId].model = 'fixture/reviewer';
+  h.config.legacyReviews[id].model = 'fixture/reviewer';
+  h.config.legacyReviews[id].harness = 'claude';
+  await assert.rejects(h.reflection.review(h.input), /harness must be pi/);
+  assert.equal(calls, 0);
+  assert.equal((await h.runtime.state()).reflections[h.input.origin].reviews.length, 0);
+  delete h.config.legacyReviews[id].harness;
   const result = await h.reflection.review(h.input);
   assert.equal(result.status, 'interrupted');
   await assert.rejects(h.reflection.review(h.input), /interrupted|uncertain/);

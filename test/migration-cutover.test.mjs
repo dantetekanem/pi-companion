@@ -8,6 +8,20 @@ import { resolveDataRoot } from '../src/cli/migration/admission.mjs';
 import { runUpgrade } from '../src/cli/migration/cutover.mjs';
 
 
+test('fresh non-Pi config rejects before fencing; pinned legacy comparisons remain byte-identical', async t => {
+  const h = await fixture(t);
+  h.options.config.background = { harness: 'claude', model: 'sonnet', effort: 'max' };
+  await assert.rejects(runUpgrade(h.journal, h.options), /harness.*pi/);
+  assert.equal(existsSync(h.options.controlRoot), false);
+  assert.equal(h.journal.record.phase, 'inventory');
+  const config = { ...h.options.config, initializedAt: h.journal.record.createdAt };
+  const journal = { check() {}, record: { phase: 'comparison-only', createdAt: config.initializedAt, validation: { plan: { config, requestedConfig: config } } } };
+  const before = JSON.stringify(journal.record);
+  await assert.rejects(runUpgrade(journal, { config }), /Unsupported migration phase/);
+  await assert.rejects(runUpgrade(journal, { config: { ...config, concurrency: 3 } }), /configuration changed after fencing/);
+  assert.equal(JSON.stringify(journal.record), before);
+});
+
 test('complete upgrade preserves every source, imports every owned schedule and activates only once', async t => {
   const h = await fixture(t), result = await runUpgrade(h.journal, h.options);
   assert.equal(result.status, 'verified');

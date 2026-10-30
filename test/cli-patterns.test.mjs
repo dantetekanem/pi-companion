@@ -1,8 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, appendFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, appendFileSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { createHash } from 'node:crypto';
 import { initialize } from '../src/cli/config.mjs';
 import { previewPatterns, submitPatterns } from '../src/cli/patterns.mjs';
 import { readLocalView } from '../src/cli/view.mjs';
@@ -76,18 +77,32 @@ test('changed sources, changed destination or absent consent cannot enter review
   assert.equal(calls, 0);
 });
 
-test('both review harnesses disable tools and select the session-pattern purpose without weakening repair restrictions', () => {
-  for (const harness of ['pi', 'claude']) {
-    const invocation = buildInvocation({
-      harness,
-      model: harness === 'pi' ? 'fixture/reviewer' : 'sonnet',
-      effort: 'high',
-      id: 'ccb12430-4c74-49a1-bfa4-72d14c9bd898',
-      cwd: '/synthetic',
-      sessionFile: '/synthetic/job.jsonl',
-      prompt: '{}',
-      purpose: 'session-patterns',
-    });
-    assert.ok(harness === 'pi' ? invocation.args.includes('--no-tools') : invocation.args[invocation.args.indexOf('--tools') + 1] === '');
-  }
+test('Claude destinations reject fresh and saved previews before submission without rewriting them', async t => {
+  const h = fixture(t);
+  const selection = { ...h.selection, consent: { harness: 'claude', model: 'sonnet', effort: 'high' } };
+  assert.throws(() => previewPatterns(h.root, selection), /harness.*pi/);
+  const preview = previewPatterns(h.root, h.selection);
+  const payload = { selection, binding: selection.consent, evidence: { ...preview.evidence, destination: { harness: 'claude', model: 'sonnet' } } };
+  const hash = createHash('sha256').update(JSON.stringify(payload)).digest('hex');
+  const path = join(h.root, 'reviews', `${hash}.json`);
+  const saved = JSON.stringify({ version: 1, hash, ...payload });
+  writeFileSync(path, saved);
+  let calls = 0;
+  await assert.rejects(submitPatterns(h.root, { hash, confirmation: hash, run: () => { calls++; } }), /harness.*pi/);
+  assert.equal(calls, 0);
+  assert.equal(readFileSync(path, 'utf8'), saved);
+});
+
+test('Pi pattern review disables tools', () => {
+  const invocation = buildInvocation({
+    harness: 'pi',
+    model: 'fixture/reviewer',
+    effort: 'high',
+    id: 'ccb12430-4c74-49a1-bfa4-72d14c9bd898',
+    cwd: '/synthetic',
+    sessionFile: '/synthetic/job.jsonl',
+    prompt: '{}',
+    purpose: 'session-patterns',
+  });
+  assert.ok(invocation.args.includes('--no-tools'));
 });

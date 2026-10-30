@@ -1,6 +1,6 @@
 # Find work worth automating
 
-Companion can review selected Pi or Claude sessions for repeated daily, weekly or monthly requests. This is optional. Nothing is collected or sent at startup.
+Companion can review explicitly selected Pi sessions or historical Claude JSONL sources for repeated daily, weekly or monthly requests. This is optional. Nothing is collected or sent at startup.
 
 Create a local JSON selection with explicit source files, a date window and the exact destination:
 
@@ -17,6 +17,6 @@ Create a local JSON selection with explicit source files, a date window and the 
 
 Run `pi-companion patterns-preview --selection /absolute/selection.json`. Inspect the excerpts, source hashes, omissions and destination in the local preview. It contains user-role text and tool names, not complete transcripts or tool arguments. Keep the preview private.
 
-Only after reviewing it, stop any running Companion owner and run `pi-companion patterns-submit --preview HASH --confirm HASH`, using the returned hash twice. This sends the previewed evidence to that model, with tools disabled. Source or destination changes require a new preview. The resulting report appears on the dashboard and does not create or enable schedules. Repeating the same submission does not run it again.
+Only after reviewing it, stop any running Companion owner and run `pi-companion patterns-submit --preview HASH --confirm HASH`, using the returned hash twice. This sends the previewed evidence to the selected Pi model, with tools disabled. Source or destination changes require a new preview. The resulting report appears on the dashboard and does not create or enable schedules. Repeating the same submission does not run it again.
 
-Use the same `--home` for both commands and the dashboard. Claude is also supported as a destination when explicitly selected, with its model alias and effort. Exclusion text stays local; the model receives exclusion counts and the collector's omissions. Counts describe only the selected material, not all your work or proof that a feature is unused.
+Use the same `--home` for both commands and the dashboard. The destination always uses the Pi harness. Choose a Pi-supported provider/model and effort; this includes an Anthropic/Claude model configured in Pi. Claude JSONL is a historical source format only and does not launch the Claude executable. Exclusion text stays local; the model receives exclusion counts and the collector's omissions. Counts describe only the selected material, not all your work or proof that a feature is unused.

@@ -195,6 +195,9 @@ test('every turn revalidates binding and mapped cwd before provider dispatch', a
   assert.equal(h.calls[1].effort, 'high');
   h.delivery.config.legacySessions[id].model = 'other/model';
   await assert.rejects(h.delivery.prompt(h.request(0)), /provider/);
+  h.delivery.config.legacySessions[id].model = 'fixture/updated';
+  h.delivery.config.legacySessions[id].harness = 'claude';
+  await assert.rejects(h.delivery.prompt(h.request(0)), /harness must be pi/);
   delete h.delivery.config.legacySessions;
   assert.equal(h.calls.length, 2);
   for (const mappedCwd of ['/missing-companion-fixture-cwd']) {

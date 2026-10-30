@@ -1,11 +1,14 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { stripVTControlCharacters } from 'node:util';
-import { CURSOR_MARKER, getCellDimensions, getKeybindings, setCellDimensions, stripTerminalSequences, visibleWidth } from '@earendil-works/pi-tui';
+import {
+  CURSOR_MARKER, getCapabilities, getCellDimensions, getKeybindings, resetCapabilitiesCache, setCapabilities,
+  setCellDimensions, stripTerminalSequences, visibleWidth,
+} from '@earendil-works/pi-tui';
 import { createDashboard, startDashboard } from '../src/cli/ui.mjs';
 
 const snapshot = {
@@ -374,19 +377,50 @@ test('pending acceptance preserves edits and long multiline drafts remain within
   }
 });
 
-test('only visible chat entries have author blocks and busy feedback lives in the footer', () => {
+test('only visible chat entries have author blocks and the header times the busy main turn', () => {
   const messages = [
     { role: 'user', content: 'Question' },
     { role: 'assistant', content: '' },
     { role: 'assistant', content: '  ' },
     { role: 'assistant', content: 'Reply' },
   ];
-  const ui = createDashboard({ ...snapshot, messages, busy: true, connection: 'connected' });
+  let now = Date.parse('2026-10-29T18:08:00Z');
+  const ui = createDashboard({ ...snapshot, messages, busy: true, connection: 'connected' }, {}, { now: () => now });
+  now += 15000;
+
   const rendered = screen(ui, 80, 24).split('\n');
-  assert.equal(rendered.filter(value => value.trim() === 'Companion').length, 1);
-  assert.match(rendered.slice(-2).join('\n'), /Thinking/);
+  assert.equal(rendered.filter(value => /^\s*◆ Companion\b/.test(value)).length, 1);
+  assert.match(rendered[0], /working 15s/);
+
   ui.update({ ...snapshot, messages, busy: false, connection: 'connected' });
-  assert.doesNotMatch(screen(ui, 80, 24).split('\n').slice(-2).join('\n'), /Thinking/);
+  assert.match(screen(ui, 80, 24).split('\n')[0], /● connected/);
+});
+
+test('busy or live-job activity animates only while work runs and never after stop', async () => {
+  const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
+  const busy = { ...snapshot, connection: 'connected', busy: true };
+  const idle = { ...snapshot, connection: 'connected', busy: false };
+  const runningJob = { ...idle, runs: [{ id: 'a', title: 'Check', state: 'running', kind: 'background', scheduleId: 'mail' }] };
+  let frames = 0;
+  const ui = createDashboard(busy, {}, { onChange: () => { frames++; } });
+
+  await wait(350);
+  assert.ok(frames >= 2, `expected animation frames while busy, got ${frames}`);
+
+  ui.update(idle);
+  const idleFrames = frames;
+  await wait(250);
+  assert.equal(frames, idleFrames);
+
+  ui.update(runningJob);
+  const jobFrames = frames;
+  await wait(350);
+  assert.ok(frames >= jobFrames + 2, 'expected animation frames while a live job runs');
+
+  ui.stop();
+  const stoppedFrames = frames;
+  await wait(250);
+  assert.equal(frames, stoppedFrames);
 });
 
 test('fullscreen editor loads namespaced Pi typing bindings without changing the file', t => {
@@ -400,6 +434,44 @@ test('fullscreen editor loads namespaced Pi typing bindings without changing the
   terminal.input('\x11');
   terminal.input('start ');
   assert.equal(ui.state().draft, 'start end');
+});
+
+test('fullscreen dashboard follows the saved Pi theme and switches live when the setting changes', async t => {
+  const agentDir = mkdtempSync(join(tmpdir(), 'companion-theme-'));
+  const previousAgentDir = process.env.PI_CODING_AGENT_DIR;
+  const terminal = new FakeTerminal();
+  let ui;
+  t.after(() => {
+    ui?.stop();
+    resetCapabilitiesCache();
+    if (previousAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = previousAgentDir;
+    rmSync(agentDir, { recursive: true, force: true });
+  });
+  process.env.PI_CODING_AGENT_DIR = agentDir;
+  setCapabilities({ ...getCapabilities(), trueColor: true });
+  const piDark = new URL('modes/interactive/theme/dark.json', import.meta.resolve('@earendil-works/pi-coding-agent'));
+  const base = JSON.parse(readFileSync(piDark, 'utf8'));
+  const saveTheme = (name, accent) => writeFileSync(join(agentDir, 'themes', `${name}.json`),
+    JSON.stringify({ ...base, name, colors: { ...base.colors, accent } }));
+  const chooseTheme = name => writeFileSync(join(agentDir, 'settings.json'), JSON.stringify({ theme: name }));
+  const brandRow = () => ui.render(120, 40)[0];
+  mkdirSync(join(agentDir, 'themes'));
+  saveTheme('ocean', '#0a84ff');
+  saveTheme('ember', '#ff6a00');
+  chooseTheme('ocean');
+
+  ui = startDashboard(snapshot, {}, { terminal, theme: { cwd: agentDir } });
+  assert.match(brandRow(), /\x1b\[38;2;10;132;255m◆/);
+
+  chooseTheme('ember');
+  for (const deadline = Date.now() + 3000; !brandRow().includes('\x1b[38;2;255;106;0m◆') && Date.now() < deadline;) {
+    await new Promise(resolve => setTimeout(resolve, 25));
+  }
+  assert.match(brandRow(), /\x1b\[38;2;255;106;0m◆/);
+
+  ui.stop();
+  assert.match(createDashboard(snapshot).render(120, 40)[0], /\x1b\[38;2;255;121;198m◆/);
 });
 
 test('selectable questions preserve drafts, require confirmation, and cancel on Escape or shutdown', async t => {
@@ -571,6 +643,39 @@ test('/clear keeps the draft and visible chat when persistence fails', async () 
   assert.match(ui.state().notice, /Clear failed.*disk full/);
 });
 
+test('/clear confirmation disappears after 3 seconds and redraws', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let renders = 0;
+  const ui = createDashboard(snapshot, {}, { onChange: () => { renders++; } });
+
+  ui.input('/clear');
+  ui.input('\r');
+  await ui.pending();
+
+  t.mock.timers.tick(2999);
+  assert.match(ui.state().notice, /Visible chat cleared/);
+
+  const rendersBeforeTimeout = renders;
+  t.mock.timers.tick(1);
+  assert.equal(ui.state().notice, '');
+  assert.ok(renders > rendersBeforeTimeout);
+});
+
+test('a newer notice outlives the /clear confirmation timer', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const ui = createDashboard(snapshot);
+  const submit = async text => {
+    ui.input(text);
+    ui.input('\r');
+    await ui.pending();
+  };
+  await submit('/clear');
+  await submit('/not-a-command');
+
+  t.mock.timers.tick(3000);
+  assert.match(ui.state().notice, /Unknown command/);
+});
+
 test('Schedules groups live background jobs, sorts active schedules first and keeps offline truth', () => {
   const now = () => Date.parse('2026-10-28T00:03:00Z');
   const schedules = [
@@ -609,7 +714,7 @@ test('Schedules groups live background jobs, sorts active schedules first and ke
       state: 'running',
       kind: 'background',
       scheduleId: 'recap',
-      harness: 'claude',
+      harness: 'pi',
       model: 'fixture/local',
       effort: 'high',
       cwd: '/tmp/job-1',
@@ -641,7 +746,7 @@ test('Schedules groups live background jobs, sorts active schedules first and ke
   let rendered = screen(ui, 120, 40);
   assert.match(rendered, /connected · 2 running/);
   assert.ok(rendered.indexOf('Morning recap') < rendered.indexOf('Later check'));
-  assert.match(rendered, /claude.*fixture\/local.*high/);
+  assert.match(rendered, /pi.*fixture\/local.*high/);
   for (const [width, height] of [[120, 40], [80, 24], [60, 18]]) {
     screen(ui, width, height);
     assert.ok(ui.render(width, height).length <= height);

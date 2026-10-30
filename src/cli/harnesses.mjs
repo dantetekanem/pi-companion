@@ -9,6 +9,7 @@ const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const validCost = value => typeof value === 'number' && Number.isFinite(value) && value >= 0;
 
 export function buildInvocation(request) {
+  if (request.harness !== 'pi') throw Error('Execution requires an explicit Pi binding.');
   validateBinding(request);
   if (!uuid.test(request.id) || !isAbsolute(request.cwd ?? '') || typeof request.prompt !== 'string'
     || !request.prompt.trim() || Buffer.byteLength(request.prompt) > 65536) {
@@ -18,43 +19,22 @@ export function buildInvocation(request) {
     throw Error('Unsupported harness purpose.');
   }
   const noTools = request.purpose !== undefined && request.purpose !== 'compatibility-check';
-  if (request.purpose !== undefined && request.purpose !== 'session-patterns' && request.harness !== 'pi') {
-    throw Error('Repair and reflection require their consented Pi binding.');
-  }
   const system = readFileSync(new URL(`../prompts/${request.purpose ?? 'background'}.md`, import.meta.url), 'utf8');
-  let args;
-  if (request.harness === 'pi') {
-    if (!isAbsolute(request.sessionFile ?? '')) throw Error('Pi requires an explicit job session file.');
-    args = [
-      '--mode', 'rpc',
-      '--session', request.sessionFile,
-      '--thinking', request.effort,
-      // Tool-enabled jobs keep Pi's normal prompt, tool guidance and extension guidelines.
-      ...(noTools ? [
-        '--no-tools',
-        '--no-extensions', '--no-skills', '--no-prompt-templates', '--no-themes',
-        '--no-context-files', '--no-approve',
-        '--system-prompt', system,
-      ] : ['--append-system-prompt', system]),
-    ];
-  } else {
-    if (request.resume && !uuid.test(request.sessionId ?? '')) throw Error('Claude resume requires an exact session UUID.');
-    args = [
-      '--print', '--output-format', 'stream-json', '--verbose',
-      '--effort', request.effort,
-      '--tools', noTools ? '' : 'Read,Grep,Glob',
-      '--allowedTools', noTools ? '' : 'Read,Grep,Glob',
-      '--permission-mode', 'dontAsk',
-      '--permission-prompts', 'none',
-      '--safe-mode', '--restricted', '--no-chrome', '--disable-slash-commands',
-      '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}',
-      '--setting-sources', '',
+  if (!isAbsolute(request.sessionFile ?? '')) throw Error('Pi requires an explicit job session file.');
+  const args = [
+    '--mode', 'rpc',
+    '--session', request.sessionFile,
+    '--thinking', request.effort,
+    // Tool-enabled jobs keep Pi's normal prompt, tool guidance and extension guidelines.
+    ...(noTools ? [
+      '--no-tools',
+      '--no-extensions', '--no-skills', '--no-prompt-templates', '--no-themes',
+      '--no-context-files', '--no-approve',
       '--system-prompt', system,
-      ...(request.resume ? ['--resume', request.sessionId] : ['--session-id', request.id]),
-    ];
-  }
+    ] : ['--append-system-prompt', system]),
+  ];
   if (request.model) args.push('--model', request.model);
-  return { command: request.harness, args };
+  return { command: 'pi', args };
 }
 
 /** The caller persists admission before invoking this function. It never retries a child; only its signal stops one. */
@@ -63,14 +43,14 @@ export async function runHarness(request, { spawnProcess = spawn, maxOutputBytes
   if (!Number.isInteger(maxOutputBytes) || maxOutputBytes < 1) throw Error('Invalid harness bounds.');
   const result = {
     id: request.id,
-    harness: request.harness,
+    harness: 'pi',
     status: 'failed',
     text: '',
     cost: null,
     model: request.model,
     effort: request.effort,
     sessionId: null,
-    freshSession: request.harness === 'pi' ? !existsSync(request.sessionFile) : !request.resume,
+    freshSession: !existsSync(request.sessionFile),
   };
   if (request.signal?.aborted) return { ...result, status: 'interrupted', error: 'Cancelled before dispatch.' };
   let child;
@@ -99,7 +79,6 @@ export async function runHarness(request, { spawnProcess = spawn, maxOutputBytes
   let stopping = false;
   let killTimer;
   let assistant;
-  let finalClaude;
   const decoder = new StringDecoder('utf8');
   const terminate = () => {
     if (stopping || exited) return;
@@ -151,10 +130,6 @@ export async function runHarness(request, { spawnProcess = spawn, maxOutputBytes
     if (record.type === 'agent_settled') {
       if (record.aborted === true) fail(Object.assign(Error('Pi agent run was aborted.'), { interrupted: true }));
       else settled.resolve();
-    }
-    if (record.type === 'result' && request.harness === 'claude') {
-      if (finalClaude && JSON.stringify(record) !== JSON.stringify(finalClaude)) throw Error('Conflicting Claude final results.');
-      finalClaude = record;
     }
     onEvent(record);
   };
@@ -217,57 +192,42 @@ export async function runHarness(request, { spawnProcess = spawn, maxOutputBytes
   const cancel = () => fail(Object.assign(Error('Harness cancelled.'), { interrupted: true }));
   request.signal?.addEventListener('abort', cancel, { once: true });
   try {
-    if (request.harness === 'pi') {
-      const state = await rpc('get_state');
-      if (!state?.sessionId || state.thinkingLevel !== request.effort) {
-        throw Error('Pi did not retain the requested effort; no prompt was submitted.');
-      }
-      const model = state.model && `${state.model.provider}/${state.model.id}`;
-      if (!model || (request.model?.includes('/') && request.model !== model)) {
-        throw Error('Pi did not retain the requested model; no prompt was submitted.');
-      }
-      result.sessionId = state.sessionId;
-      result.model = model;
-      await rpc('prompt', { message: request.prompt });
-      await settled.promise;
-      result.text = clean(assistant?.content?.filter(part => part.type === 'text').map(part => part.text).join('\n'));
-      if (assistant?.stopReason !== 'stop' || !result.text.trim()) {
-        throw Error(`Pi did not finish a response (${assistant?.stopReason ?? 'missing'}).`);
-      }
-      let stats;
-      let statsUnavailable = false;
-      try {
-        stats = await rpc('get_session_stats');
-      } catch (error) {
-        if (!error.commandRejected || failure || exited) throw error;
-        statsUnavailable = true;
-      }
-      if (!statsUnavailable && stats?.sessionId !== state.sessionId) {
-        throw Error('Pi session identity changed during the job.');
-      }
-      if (validCost(stats?.cost)) {
-        result.cost = { usd: stats.cost, kind: 'estimate', cumulative: true, sessionId: state.sessionId };
-      }
-      result.status = 'completed';
-      terminate();
-      await closed.promise;
-    } else {
-      child.stdin.end(request.prompt);
-      const exit = await closed.promise;
-      if (failure) throw failure;
-      if (finalClaude?.session_id !== (request.resume ? request.sessionId : request.id)) {
-        throw Error('Claude result identity does not match the requested session.');
-      }
-      result.sessionId = finalClaude.session_id;
-      if (validCost(finalClaude?.total_cost_usd) && result.sessionId) {
-        result.cost = { usd: finalClaude.total_cost_usd, kind: 'estimate', cumulative: true, sessionId: result.sessionId };
-      }
-      result.text = clean(finalClaude?.result);
-      if (exit.code !== 0 || !finalClaude || finalClaude.is_error || finalClaude.subtype !== 'success' || !result.text.trim()) {
-        throw Error(`Claude did not finish successfully (${exit.code ?? exit.signal}). ${result.text || stderr}`);
-      }
-      result.status = 'completed';
+    const state = await rpc('get_state');
+    if (!state?.sessionId || state.thinkingLevel !== request.effort) {
+      throw Error('Pi did not retain the requested effort; no prompt was submitted.');
     }
+    const model = state.model && `${state.model.provider}/${state.model.id}`;
+    if (!model || (request.model?.includes('/') && request.model !== model)) {
+      throw Error('Pi did not retain the requested model; no prompt was submitted.');
+    }
+    result.sessionId = state.sessionId;
+    result.model = model;
+    const response = await rpc('prompt', { message: request.prompt });
+    if (response?.disposition === 'handled') {
+      throw Error('Pi handled the prompt without starting an assistant response.');
+    }
+    await settled.promise;
+    result.text = clean(assistant?.content?.filter(part => part.type === 'text').map(part => part.text).join('\n'));
+    if (assistant?.stopReason !== 'stop' || !result.text.trim()) {
+      throw Error(`Pi did not finish a response (${assistant?.stopReason ?? 'missing'}).`);
+    }
+    let stats;
+    let statsUnavailable = false;
+    try {
+      stats = await rpc('get_session_stats');
+    } catch (error) {
+      if (!error.commandRejected || failure || exited) throw error;
+      statsUnavailable = true;
+    }
+    if (!statsUnavailable && stats?.sessionId !== state.sessionId) {
+      throw Error('Pi session identity changed during the job.');
+    }
+    if (validCost(stats?.cost)) {
+      result.cost = { usd: stats.cost, kind: 'estimate', cumulative: true, sessionId: state.sessionId };
+    }
+    result.status = 'completed';
+    terminate();
+    await closed.promise;
   } catch (error) {
     result.status = (failure ?? error).interrupted ? 'interrupted' : 'failed';
     result.error = clean((failure ?? error).message).slice(0, 2000);

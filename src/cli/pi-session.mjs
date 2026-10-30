@@ -51,6 +51,15 @@ export async function withPiCancellation(session, signal, operation) {
   }
 }
 
+export async function closePiSession(session) {
+  if (!session) return;
+  try {
+    await session.extensionRunner?.emit({ type: 'session_shutdown', reason: 'exit' });
+  } finally {
+    session.dispose();
+  }
+}
+
 /** Pi owns the transcript format. Durable stores only its identity and dispatch receipts. */
 export async function openPiSession(
   { root, config, saved, fresh = false, askQuestion, triggerSchedule },
@@ -217,7 +226,7 @@ export async function bindingFromSession(bytes, explicit) {
     model: context.model ? `${context.model.provider}/${context.model.modelId}` : null,
     effort: context.thinkingLevel,
   };
-  validateBinding({ ...binding, harness: 'pi' });
+  validateBinding({ harness: 'pi', ...binding });
   if (typeof binding.model !== 'string' || !/^[^/\s]+\/\S+$/.test(binding.model)) {
     throw Error('Adopted session needs an explicit fully qualified delivery binding.');
   }
@@ -251,9 +260,13 @@ async function openConversation(
   { root, config, expected, file, fresh = false, customTools = [], modelSettings },
   { createSession, agentDir, modelRuntime: suppliedModelRuntime } = {},
 ) {
+  validateBinding({ harness: 'pi', ...config.main });
   const {
     SessionManager,
     createAgentSession,
+    createCodemodeExtension,
+    createMcpExtension,
+    createToolSearchExtension,
     DefaultResourceLoader,
     ModelRuntime,
     resolveCliModel,
@@ -282,12 +295,15 @@ async function openConversation(
       main: config.main,
       background: config.background,
     }, null, 2)));
-  // Do not boot the old scheduler/Companion or another unattended extension in this owner.
   const resourceLoader = new DefaultResourceLoader({
     cwd: config.main.cwd,
     agentDir: effectiveAgentDir,
     settingsManager,
-    noExtensions: true,
+    extensionFactories: [
+      { name: 'codemode', factory: createCodemodeExtension(), builtin: true, replaceable: true },
+      { name: 'tool-search', factory: createToolSearchExtension(), builtin: true, replaceable: true },
+      { name: 'mcp', factory: createMcpExtension(), builtin: true, replaceable: true },
+    ],
     appendSystemPrompt,
   });
   await resourceLoader.reload();
@@ -326,5 +342,11 @@ async function openConversation(
     session.dispose();
     throw Error(modelFallbackMessage ?? 'Pi model or thinking binding changed.');
   }
-  return session;
+  try {
+    await session.bindExtensions({});
+    return session;
+  } catch (error) {
+    await closePiSession(session);
+    throw error;
+  }
 }

@@ -18,13 +18,13 @@ import { assertRuntimeAdmission } from './admission.mjs';
 function blocked(kind, diagnostics) {
   throw Object.assign(Error(`Migration ${kind} validation failed; no partial activation is permitted.`), { code: 'MIGRATION_BLOCKED', diagnostics });
 }
-function configFor(journal, input) {
-  return validateConfig({ ...input, version: 2, initializedAt: journal.record.createdAt });
+function configFor(journal, input, options) {
+  return validateConfig({ ...input, version: 2, initializedAt: journal.record.createdAt }, options);
 }
 function assertPlan(journal, options) {
   const plan = journal.record.validation.plan;
   for (const key of ['sessions', 'decisions', 'overrides', 'reviewSettings']) if (options[key] !== undefined && !isDeepStrictEqual(options[key], plan[key])) throw Error('Validated migration plan changed after fencing.');
-  if (options.config && !isDeepStrictEqual(configFor(journal, options.config), plan.requestedConfig ?? plan.config)) throw Error('Validated migration configuration changed after fencing.');
+  if (options.config && !isDeepStrictEqual(configFor(journal, options.config, { allowLegacyHarness: true }), plan.requestedConfig ?? plan.config)) throw Error('Validated migration configuration changed after fencing.');
   return plan;
 }
 function verifyRemainingSources(journal) {

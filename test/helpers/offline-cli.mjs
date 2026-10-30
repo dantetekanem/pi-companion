@@ -11,7 +11,7 @@ const root = realpathSync(process.argv[2]);
 const trace = value => appendFileSync(join(root, 'trace.txt'), value + '\n');
 const config = initialize(root, { cwd: root, now: '2026-01-01T00:00:00Z' });
 config.main.model = 'fixture/local';
-config.background = { harness: 'claude', model: 'fixture-background', effort: 'high' };
+config.background = { harness: 'pi', model: 'fixture-background', effort: 'high' };
 atomicJson(join(root, 'config.json'), config);
 
 const schedule = {

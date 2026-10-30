@@ -14,76 +14,13 @@ const outputText = value => {
 
 /** Allowlisted, disposable display data; never retains harness records. */
 export class JobActivity {
-  output = [];
-  children = new Map();
+  entries = [];
   message = 0;
   hidden = false;
 
-  constructor(root = null, runId = '', agentName = '') {
-    this.root = root;
-    this.prefix = runId ? `child:${JSON.stringify(runId)}:` : '';
-    this.label = runId ? { agentName: clean(agentName) } : {};
-  }
-
-  get entries() { return this.root ? this.root.entries : this.output; }
-  set entries(value) { if (this.root) this.root.entries = value; else this.output = value; }
-
-  widget(event) {
-    const prefix = 'pi-extended-teams:agent-output:v1:';
-    if (
-      event.method !== 'setWidget'
-      || typeof event.widgetKey !== 'string'
-      || !event.widgetKey.startsWith(prefix)
-      || this.root
-    ) return;
-
-    const runId = event.widgetKey.slice(prefix.length);
-    const lines = event.widgetLines;
-    if (
-      !runId || !Array.isArray(lines) || lines.length !== 5
-      || !lines.every(value => typeof value === 'string')
-    ) return;
-
-    const [name, sequence, index, count, chunk] = lines;
-    if (
-      !name
-      || !/^[1-9]\d*$/.test(sequence)
-      || !/^(0|[1-9]\d*)$/.test(index)
-      || !/^[1-9]\d*$/.test(count)
-      || ![sequence, index, count].every(value => Number.isSafeInteger(Number(value)))
-      || chunk.length > 16384
-    ) return;
-    const seq = Number(sequence);
-    const position = Number(index);
-    const total = Number(count);
-    if (position >= total) return;
-
-    let child = this.children.get(runId);
-    if (!child) {
-      child = new JobActivity(this, runId, name);
-      child.sequence = 0;
-      this.children.set(runId, child);
-    }
-    if (seq <= child.sequence) return;
-    if (position === 0) child.pending = { seq, total, name, chunks: [] };
-    const pending = child.pending;
-    if (
-      !pending || pending.seq !== seq || pending.total !== total
-      || pending.name !== name || pending.chunks.length !== position
-    ) return;
-    pending.chunks.push(chunk);
-    if (pending.chunks.length !== total) return;
-
-    child.pending = null;
-    const projected = JSON.parse(pending.chunks.join(''));
-    child.sequence = seq;
-    child.accept(projected);
-  }
-
   accept(event) {
     try {
-      if (event?.type === 'extension_ui_request') this.widget(event);
-      else this.reduce(event);
+      this.reduce(event);
     } catch {
       /* Display data must not fail execution. */
     }
@@ -91,10 +28,10 @@ export class JobActivity {
 
   text(index, value, append = false) {
     if (!Number.isInteger(index) || index < 0 || typeof value !== 'string') return;
-    const id = `${this.prefix}message:${this.message}:${index}`;
+    const id = `message:${this.message}:${index}`;
     let entry = this.entries.find(item => item.id === id);
     if (!entry) {
-      entry = { id, kind: 'assistant', text: '', ...this.label };
+      entry = { id, kind: 'assistant', text: '' };
       this.entries.push(entry);
     }
     const previousText = append ? entry.text : '';
@@ -103,11 +40,11 @@ export class JobActivity {
 
   tool(id, name, state, input, output) {
     if (typeof id !== 'string' || !id) return;
-    const key = `${this.prefix}tool:${id}`;
+    const key = `tool:${id}`;
     let entry = this.entries.find(item => item.id === key);
     if (!entry) {
       if (typeof name !== 'string' || !name) return;
-      entry = { id: key, kind: 'tool', name: clean(name), state, ...this.label };
+      entry = { id: key, kind: 'tool', name: clean(name), state };
       this.entries.push(entry);
     }
     entry.state = state;
@@ -148,9 +85,9 @@ export class JobActivity {
         const content = typeof event.message.content === 'string' ? [{ type: 'text', text: event.message.content }] : event.message.content;
         if (!Array.isArray(content)) return;
         const ids = new Set(content.flatMap((part, index) =>
-          part?.type === 'text' && part.display !== false ? [`${this.prefix}message:${this.message}:${index}`] : []));
+          part?.type === 'text' && part.display !== false ? [`message:${this.message}:${index}`] : []));
         this.entries = this.entries.filter(entry =>
-          !entry.id.startsWith(`${this.prefix}message:${this.message}:`) || ids.has(entry.id));
+          !entry.id.startsWith(`message:${this.message}:`) || ids.has(entry.id));
         content.forEach((part, index) => {
           if (part?.display === false) return;
           if (part?.type === 'text') this.text(index, part.text);
@@ -163,16 +100,6 @@ export class JobActivity {
       this.tool(event.toolCallId, event.toolName, 'running', event.args, event.partialResult);
     } else if (event.type === 'tool_execution_end') {
       this.tool(event.toolCallId, event.toolName, event.isError ? 'failed' : 'completed', undefined, event.result);
-    } else if (['assistant', 'user'].includes(event.type)
-      && event.message?.display !== false
-      && Array.isArray(event.message?.content)) {
-      this.message++;
-      for (const [index, part] of event.message.content.entries()) {
-        if (part?.display === false) continue;
-        if (event.type === 'assistant' && part?.type === 'text') this.text(index, part.text);
-        if (event.type === 'assistant' && part?.type === 'tool_use') this.tool(part.id, part.name, 'running', part.input);
-        if (event.type === 'user' && part?.type === 'tool_result') this.tool(part.tool_use_id, null, part.is_error ? 'failed' : 'completed', undefined, part.content);
-      }
     }
   }
 

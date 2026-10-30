@@ -298,7 +298,7 @@ test('activity projection keeps live scheduled jobs visible beyond history limit
     ui.input('\x1b[C');
     ui.input('\x1b[C');
     const live = stripTerminalSequences(ui.render(140, 60).join('\n'));
-    assert.match(live, /Schedules \(2\)/);
+    assert.match(live, /Schedules 2\b/);
     assert.match(live, /2 running/);
     for (const text of [
       'Daily audit', 'Backup review', 'fixture-harness', 'fixture/daily', 'fixture/backup',
@@ -441,6 +441,43 @@ test('visible scheduled reports add stable local notices without changing contex
     assert.equal(providerCalls, 0);
   } finally {
     await final.close();
+  }
+});
+
+test('scheduled reports talk back in chat only for critical or useful triage lines', async t => {
+  const h = fixture(t);
+  const runHarness = async () => { throw Error('Unexpected provider call in synthetic triage test.'); };
+  const app = await h.openApp({ runHarness });
+  try {
+    const contextMessagesBefore = app.runtime.messages();
+    await app.runtime.change(state => {
+      state.runs.critical = backgroundRun('critical', {
+        title: 'Financial freedom',
+        result: { status: 'completed', text: '**Critical:** Rent is due tomorrow and the balance is short.\n\nDetails.' },
+      });
+      state.runs.useful = backgroundRun('useful', {
+        title: 'Health progress',
+        result: { status: 'completed', text: 'Useful: Resting heart rate fell 3 bpm over two weeks.\n\nDetails.' },
+      });
+      state.runs.quiet = backgroundRun('quiet', {
+        title: 'Calendar deadlines',
+        result: { status: 'completed', text: 'Nothing new.\n\nChecked the next 14 days.' },
+      });
+    });
+
+    const view = await app.refresh();
+
+    const notices = view.messages.filter(message => message.role === 'notice')
+      .map(({ content, tone }) => ({ content, tone }))
+      .sort((left, right) => left.content.localeCompare(right.content));
+    assert.deepEqual(notices, [
+      { content: 'Financial freedom: Rent is due tomorrow and the balance is short.', tone: 'critical' },
+      { content: 'Health progress: Resting heart rate fell 3 bpm over two weeks.', tone: 'useful' },
+    ]);
+    assert.ok(view.reports.some(report => report.id === 'quiet'));
+    assert.deepEqual(app.runtime.messages(), contextMessagesBefore);
+  } finally {
+    await app.close();
   }
 });
 

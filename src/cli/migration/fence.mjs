@@ -25,7 +25,12 @@ function readPrivate(path) {
 async function gated(directory, operation) {
   privateDirectory(directory);
   let fault;
-  const release = await lockfile.lock(directory, { retries: 0, stale: 300000, update: 10000, onCompromised: error => { fault = error; } });
+  const release = await lockfile.lock(directory, {
+    retries: { retries: 10, minTimeout: 10, maxTimeout: 200 },
+    stale: 300000,
+    update: 10000,
+    onCompromised: error => { fault = error; },
+  });
   const check = () => { if (fault) throw fault; };
   try {
     check();

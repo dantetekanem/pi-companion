@@ -59,6 +59,7 @@ function mainFactory(control = {}) {
           control.aborted = true;
           control.gate?.resolve();
         },
+        async bindExtensions() {},
         dispose() { control.disposed = true; },
       };
       return { session };
@@ -66,7 +67,7 @@ function mainFactory(control = {}) {
   });
 }
 
-test('main SDK receives Companion context and ordinary project resources without extensions or an initial model turn', async t => {
+test('main SDK receives Companion context and ordinary project resources without an initial model turn', async t => {
   const { root, config } = home(t);
   const control = {};
   writeFileSync(join(root, 'AGENTS.md'), 'Synthetic local context');
@@ -75,7 +76,6 @@ test('main SDK receives Companion context and ordinary project resources without
     await runtime.connect();
     assert.ok(control.resources.getAppendSystemPrompt().length > 0);
     assert.ok(control.resources.getAgentsFiles().agentsFiles.some(file => file.path === join(root, 'AGENTS.md')));
-    assert.deepEqual(control.resources.getExtensions().extensions, []);
     assert.equal(control.calls, undefined);
   } finally {
     await runtime.close();

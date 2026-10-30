@@ -53,7 +53,7 @@ async function connected(options, snapshot, output, dependencies) {
           if (!app) throw Error('Companion is still connecting.');
           return app.kill(runId);
         },
-      });
+      }, { theme: { cwd: snapshot.config.main.cwd } });
     } else {
       keepAlive = setInterval(() => {}, 60000);
       output.write('Pi Companion running in this process. SIGINT/SIGTERM stops owned work.\n');

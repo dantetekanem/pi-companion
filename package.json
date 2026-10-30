@@ -3,7 +3,7 @@
   "version": "0.1.4",
   "private": true,
   "type": "module",
-  "description": "A chat-first Companion CLI with recurring checks, Pi conversations and Pi/Claude background harnesses.",
+  "description": "A chat-first Companion CLI with recurring Pi checks and a persistent Pi conversation.",
   "bin": { "pi-companion": "./src/cli/main.mjs" },
   "keywords": ["pi-package"],
   "repository": "https://github.com/dantetekanem/pi-companion",
@@ -11,8 +11,8 @@
   "pi": { "extensions": ["./src/index.ts"] },
   "peerDependencies": {
     "@earendil-works/pi-ai": "^1.1.0",
-    "@earendil-works/pi-coding-agent": "0.85.1",
-    "@earendil-works/pi-tui": "0.85.1",
+    "@earendil-works/pi-coding-agent": "1.4.0",
+    "@earendil-works/pi-tui": "1.4.0",
     "typebox": "*"
   },
   "scripts": {

@@ -15,6 +15,21 @@ const textOf = message => reportText(typeof message.content === 'string' ? messa
 const isVisibleScheduledReport = run => run.kind === 'background'
   && typeof run.scheduleId === 'string' && run.scheduleId.length > 0
   && run.status !== 'running' && (run.status !== 'no_change' || run.trigger === 'manual');
+// Background reports open with a triage line (prompts/background.md); only critical and useful ones talk back in chat.
+const nothingNewLine = /^(?:\*\*)?nothing new\.?(?:\*\*)?$/i;
+const talkBackLine = /^(?:\*\*)?(critical|useful)(?:\*\*)?:(?:\*\*)?\s+(.+)$/i;
+const reportTriage = run => {
+  if (run.status !== 'completed') return null;
+  const firstLine = String(run.result?.text ?? '').trim().split('\n', 1)[0].trim();
+  if (nothingNewLine.test(firstLine)) return { level: 'nothing' };
+
+  const match = firstLine.match(talkBackLine);
+  if (!match) return null;
+  return {
+    level: match[1].toLowerCase(),
+    message: match[2].replace(/\*\*$/, '').trim().slice(0, 1024),
+  };
+};
 const messageTime = message => {
   const value = message.at ?? message.timestamp;
   const time = typeof value === 'number' ? value : Date.parse(value ?? '');
@@ -140,10 +155,14 @@ export class CompanionApplication {
       const id = `notice:report:${createHash('sha256').update(String(run.id)).digest('hex')}`;
       if (noticeIds.has(id)) continue;
       const scheduleName = String(run.title ?? run.scheduleId ?? 'your schedule').slice(0, 512);
+      const triage = reportTriage(run);
+      if (triage?.level === 'nothing') continue;
+
       notices.push({
         id,
         role: 'notice',
-        content: `Report available for ${scheduleName}`,
+        content: triage ? `${scheduleName}: ${triage.message}` : `Report available for ${scheduleName}`,
+        tone: triage?.level,
         at: run.finishedAt,
       });
       noticeIds.add(id);

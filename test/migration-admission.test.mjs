@@ -121,6 +121,7 @@ test('runtime uses the adopted Pi identity and captures its historical cost as b
           getSessionStats() { return { sessionId: this.sessionId, cost: 17.25 }; },
           subscribe() { return () => {}; },
           abort: async () => {},
+          async bindExtensions() {},
           dispose() {},
         },
       }),

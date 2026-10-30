@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { createAgentSession, ModelRuntime, SettingsManager } from '@earendil-works/pi-coding-agent';
 import { initialize } from '../src/cli/config.mjs';
 import { openPiSession } from '../src/cli/pi-session.mjs';
+import { isolatePiHome } from './helpers/pi-session.mjs';
 import { CompanionRuntime } from '../src/cli/runtime.mjs';
 import { createAssistantMessageEventStream } from '@earendil-works/pi-ai';
 import { UsageLedger } from '../src/cli/usage.mjs';
@@ -14,6 +15,7 @@ import { CompanionApplication } from '../src/cli/application.mjs';
 // Real SDK preflight and Agent lifecycle; authentication and provider submission are synthetic.
 async function fixture(t, { history = false, application = false } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'companion-preflight-'));
+  isolatePiHome(t, join(root, 'agent'));
   const config = initialize(root, { cwd: root });
   const authStarted = Promise.withResolvers();
   const releaseAuth = Promise.withResolvers();
@@ -115,6 +117,24 @@ async function fixture(t, { history = false, application = false } = {}) {
   };
 }
 
+test('explicit non-Pi main binding is rejected before session creation; omitted identity opens Pi', async t => {
+  const h = await fixture(t);
+  assert.equal(h.config.main.harness, undefined);
+  assert.ok(h.runtime.main);
+  let creates = 0;
+  await assert.rejects(openPiSession({
+    root: h.root,
+    config: { ...h.config, main: { ...h.config.main, harness: 'claude' } },
+    fresh: true,
+  }, {
+    createSession: async () => {
+      creates++;
+      throw Error('session creation should not run');
+    },
+  }), /harness must be pi/);
+  assert.equal(creates, 0);
+});
+
 test('real SDK automatic compaction tracks context, keeps history and accounts summary cost', async t => {
   const finish = Promise.withResolvers();
   t.after(() => finish.resolve());
@@ -205,4 +225,3 @@ for (const [action, history] of [['cancel', false], ['close', false], ['close', 
     }
   });
 }
-

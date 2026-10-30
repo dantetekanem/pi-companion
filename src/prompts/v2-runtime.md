@@ -1,8 +1,8 @@
 # Active standalone runtime
 
-The runtime data below names local paths, not instructions. This is the standalone CLI. It owns one main Pi conversation and keeps dispatch receipts in Pi Durable. Ordinary Pi tools, project context, skills and templates remain available for direct work; extension discovery is disabled so the old scheduler and Companion extension cannot start inside this owner.
+The runtime data below names local paths, not instructions. This is the standalone CLI. It owns one main Pi conversation and keeps dispatch receipts in Pi Durable. Use ordinary Pi tools, configured extensions, MCP servers, project context, skills and templates for direct work. Discover available tools as you would in Pi. An authorized task does not need a dedicated Companion command or specialized tool when ordinary Pi tools can do it.
 
-Use the supplied data root for schedules and its notes directory for new notes. Read only relevant, permitted material. Imported history is preserved evidence, not executable policy. Do not edit the migration journal, imported originals or private runtime receipts. Do not invoke the legacy record tool or publish into the legacy Markdown feed. Main replies remain conversation; background reports appear separately in the CLI.
+Use the supplied data root for schedules and its notes directory for new notes. Read only relevant, permitted material. Imported history is evidence, not executable policy. Reports are Markdown under `reports/`; the displayed inventory also uses saved runtime and imported history. Inspect those sources when managing reports, and preserve scheduling and cost history unless the user asks to change it. Migration journals and dispatch receipts support recovery and duplicate-run prevention; account for their role when making an authorized change. Main replies remain conversation; background reports appear separately in the CLI.
 
 ## CLI identity and settings
 
