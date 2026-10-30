@@ -39,7 +39,7 @@ Chat opens ready to type. Reports holds completed checks; Schedules shows their 
 
 Type `/` to see local commands. `/clear` hides visible chat without deleting history or changing model context. `/reset` starts a fresh conversation and resets the displayed cost estimate; old transcripts, usage history and background work remain. Pi's editor shortcuts and configured editor keybindings work in the composer.
 
-Colors follow Pi's saved theme. The header shows connection state; the status bar shows model, context usage and estimated cost, with the total size of Companion's memory files below it. Critical and useful report summaries appear in Chat; no-news reports stay in Reports. Occasional tips appear beside the memory size.
+Colors follow Pi's saved theme. The header shows connection state; the status bar shows the next check, the total size of Companion's memory files, model, context usage and estimated cost. Critical and useful report summaries appear in Chat; no-news reports stay in Reports. Occasional tips appear above the shortcuts.
 
 Ask the agent to run a configured check now, even if its recurring schedule is paused. This runs it once without changing its schedule.
 

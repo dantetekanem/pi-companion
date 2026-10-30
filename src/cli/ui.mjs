@@ -373,13 +373,12 @@ const scheduleStatus = ({ schedule, jobs, live, clock, frame }) => {
   if (['blocked', 'failed', 'cancelled'].includes(state)) return { timing, tone: negative, glyph: negative('✕') };
   return { timing, tone: dim, glyph: muted('◌') };
 };
-const scheduleLines = ({ schedules, counts, diagnostics, attention, activeRuns, live, inner: fullWidth, clock, frame }) => {
+const scheduleLines = ({ schedules, counts, diagnostics, attention, activeRuns, live, inner, clock, frame }) => {
   const totals = [
     `${counts.daily ?? 0} daily`, `${counts.weekly ?? 0} weekly`, `${counts.monthly ?? 0} monthly`, `${counts.once ?? 0} once`,
     counts.compatibility ? `${counts.compatibility} migrated` : '',
   ].filter(Boolean).join(' · ');
-  const inner = fullWidth - 2;
-  const content = [];
+  const content = [row(muted(bold('UPCOMING')), muted(totals), inner), ''];
   for (const diagnostic of diagnostics) {
     const lines = wrapped(diagnostic.title, inner - 2);
     content.push(...lines.map((value, index) => `${index ? ' ' : negative('✕')} ${warning(value)}`), '');
@@ -444,7 +443,7 @@ const scheduleLines = ({ schedules, counts, diagnostics, attention, activeRuns, 
     );
   }
   if (!schedules.length) content.push(dim('No schedules yet. Add a file to schedules/daily, weekly, monthly or once.'));
-  return [row(muted(bold('UPCOMING')), muted(totals), fullWidth), '', ...content.map(value => value && `  ${value}`)];
+  return content;
 };
 const toolState = (state, frame) => {
   if (state === 'failed') return ['✕', negative];
@@ -493,13 +492,10 @@ const chatEntries = messages => {
   }
   return entries;
 };
-// Entries sit under a day heading at the same inset as report rows, so tabs line up when switching.
-const chatLines = ({ messages, inner: fullWidth, clock, markdown }) => {
+const chatLines = ({ messages, inner, clock, markdown }) => {
   const entries = chatEntries(messages);
-  const inner = fullWidth - 2;
   const content = [];
   const days = [];
-  const entry = lines => content.push(...lines.map(value => `  ${value}`));
   let day;
   entries.forEach(({ message, at, latest, repeats }, index) => {
     const startsDay = !index || (at !== null && dayOf(at) !== day);
@@ -507,7 +503,7 @@ const chatLines = ({ messages, inner: fullWidth, clock, markdown }) => {
       day = dayOf(at);
       if (index) content.push('');
       const label = dayHeading(at, clock);
-      const heading = row(label, muted(count(entries.length, 'message')), fullWidth);
+      const heading = row(label, muted(count(entries.length, 'message')), inner);
       days.push({ line: content.length, heading });
       content.push(index ? label : heading, '');
     }
@@ -516,18 +512,18 @@ const chatLines = ({ messages, inner: fullWidth, clock, markdown }) => {
       const label = `${clean(message.content)}${repeats > 1 ? ` ×${repeats}` : ''}`;
       const latestTime = latest === null ? '' : muted(clockTime(latest));
       const [glyph, paintGlyph, paintText] = noticeLooks[message.tone] ?? ['◇', muted, dim];
-      entry(wrapped(label, inner - 9).map((value, part) =>
+      content.push(...wrapped(label, inner - 9).map((value, part) =>
         part ? `  ${paintText(value)}` : `${paintGlyph(glyph)} ${row(paintText(value), latestTime, inner - 2)}`));
       content.push('');
       return;
     }
     if (message.role === 'user') {
-      if (message.about) entry([`${accent('┃')} ${muted(`↳ ${clean(message.about)}`)}`]);
-      entry(markdown(message.content, inner - 9).map((value, part) =>
+      if (message.about) content.push(`${accent('┃')} ${muted(`↳ ${clean(message.about)}`)}`);
+      content.push(...markdown(message.content, inner - 9).map((value, part) =>
         `${accent('┃')} ${part || !time ? value : row(value, time, inner - 2)}`));
     } else {
       const author = message.role === 'assistant' ? assistantColor(bold('◆ Companion')) : muted(bold(`◇ ${clean(message.role)}`));
-      entry([row(author, time, inner), ...markdown(message.content, inner - 2).map(value => `  ${value}`)]);
+      content.push(row(author, time, inner), ...markdown(message.content, inner - 2).map(value => `  ${value}`));
     }
     content.push('');
   });
@@ -567,9 +563,9 @@ const reportListLines = ({ reports, total, selectedId, inner, clock }) => {
     const [glyph, tone] = outcome(report.outcome);
     const title = clean(report.title);
     const summary = summaryOf(report);
-    const lines = [`${tone(glyph)} ${row(isSelected ? highlight(bold(title)) : title, dim(at === null ? '' : clockTime(at)), inner - 4)}`];
+    const lines = [`${tone(glyph)} ${row(isSelected ? highlight(bold(title)) : title, dim(at === null ? '' : clockTime(at)), inner - 2)}`];
     if (summary) lines.push(`  ${dim(summary)}`);
-    content.push(...lines.map(value => isSelected ? selectedRow(`${highlight('▌')} ${value}`, inner) : `  ${value}`));
+    content.push(...lines.map(value => (isSelected ? selectedRow(value, inner) : value)));
     ranges.push([start, content.length]);
   });
   if (!reports.length) content.push(dim('No reports yet.'));
@@ -596,9 +592,14 @@ const reportDetailLines = ({ report, inner, clock, markdown }) => {
     ...markdown(report.body, inner),
   ];
 };
+// A selected row's bar sits in the margin, so its glyph stays in line with every other row.
 const viewport = ({ content, offset, available, inner }) => {
   const visible = content.slice(offset, offset + available);
-  return Array.from({ length: available }, (_, index) => `  ${line(visible[index] ?? '', inner)}`);
+  return Array.from({ length: available }, (_, index) => {
+    const value = visible[index] ?? '';
+    const margin = value.startsWith(palette.selection) ? ` ${highlight('▌')}` : '  ';
+    return `${margin}${line(value, inner)}`;
+  });
 };
 
 // The dashboard draws the composer's rules; the editor only reports how many lines are scrolled away.
@@ -850,11 +851,11 @@ export function createDashboard(initial, handlers = {}, options = {}) {
       ?? modelLabel(effort, model, false);
     return row(session, cost, inner);
   };
-  const memoryAndTip = (inner, clock) => {
-    const memory = Number.isFinite(snapshot.memoryBytes)
-      ? `${muted('memory')} ${dim(kilobytes(snapshot.memoryBytes))}` : '';
+  const memorySize = () => (Number.isFinite(snapshot.memoryBytes)
+    ? `${muted('memory')} ${dim(kilobytes(snapshot.memoryBytes))}` : '');
+  const tipLine = clock => {
     const tip = tipAt([...tips, ...ignoredTips(snapshot.reportAttention ?? [])], clock);
-    return row(tip ? `${muted('tip')}   ${dim(tip)}` : '', memory, inner);
+    return tip ? `  ${muted('tip')}  ${dim(tip)}` : '';
   };
   const composerLines = inner => {
     const [above, ...lines] = editor.render(inner - 4);
@@ -891,11 +892,14 @@ export function createDashboard(initial, handlers = {}, options = {}) {
     while (shown > 1 && visibleWidth(keys(hints.slice(0, shown))) + 2 > inner) shown--;
     const activity = activityText(keys(hints.slice(0, shown)), frame);
     const rule = centered(faint('─'.repeat(Math.round(inner * FOOTER_RULE_SHARE))), inner);
-    const statusLines = [`  ${activity}`, rule, nextCheck(inner, clock), sessionBar(inner)];
-    if (height >= MIN_ROWS_FOR_TIP_LINE) statusLines.push(memoryAndTip(inner, clock));
-    if (question) return [...questionBox(inner, height, headerLength), ...statusLines];
-    if (view === 'conversation') return [...composerLines(inner), ...statusLines];
-    return ['', ...statusLines];
+    const memory = memorySize();
+    const nextCheckRow = row(nextCheck(inner - visibleWidth(memory) - 2, clock), memory, inner);
+    const statusLines = [`  ${activity}`, rule, nextCheckRow, sessionBar(inner)];
+    // The row stays reserved so a tip coming or going never moves anything.
+    const tipRows = height >= MIN_ROWS_FOR_TIP_LINE ? [tipLine(clock)] : [];
+    if (question) return [...questionBox(inner, height, headerLength), ...tipRows, ...statusLines];
+    if (view === 'conversation') return [...composerLines(inner), ...tipRows, ...statusLines];
+    return [tipRows[0] ?? '', ...statusLines];
   };
   const renderContent = (inner, available, clock, frame) => {
     const live = snapshot.connection === 'connected';

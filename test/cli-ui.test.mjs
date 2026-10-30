@@ -1140,18 +1140,19 @@ test('the day stays pinned above a chat that overflows, and follows scrolling', 
 test('tips come and go on the clock, and mention checks that go unread', () => {
   const attention = [{ scheduleId: 'recap', title: 'Morning recap', reports: 7, read: 0, ignored: true }];
   const period = 180000;
-  const footerTip = (ui, width = 120) => screen(ui, width, 40).split('\n').at(-1);
+  const rowAboveShortcuts = ui => screen(ui, 120, 40).split('\n').at(-5);
   let clock = period * 5;
   const ui = createDashboard({ ...snapshot, reportAttention: attention, memoryBytes: 2436 }, {}, { now: () => clock });
   const seen = new Set();
 
   for (let turn = 0; turn < 60; turn++) {
     clock = period * (turn + 5);
-    seen.add(footerTip(ui).match(/tip\s+(.*?)\s+memory/)?.[1]);
+    seen.add(rowAboveShortcuts(ui).match(/tip\s+(.*?)\s*$/)?.[1]);
     clock += 60000;
-    assert.doesNotMatch(footerTip(ui), /tip/, 'most of the time the row stays quiet');
-    assert.match(footerTip(ui), /memory 2\.4kb\s*$/);
+    assert.equal(rowAboveShortcuts(ui).trim(), '', 'most of the time the row stays blank');
   }
+
+  assert.match(screen(ui, 120, 40), /next check.*memory 2\.4kb/);
 
   assert.ok(seen.size >= 4, `expected variety, saw ${seen.size}`);
   assert.ok([...seen].some(tip => /Morning recap: 0 of 7 reports opened/.test(tip)));
