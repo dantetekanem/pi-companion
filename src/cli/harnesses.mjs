@@ -7,6 +7,16 @@ import { validateBinding } from './schedules.mjs';
 const clean = value => String(value ?? '').replace(/[\x00-\x08\x0b-\x1f\x7f-\x9f]/g, '');
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const validCost = value => typeof value === 'number' && Number.isFinite(value) && value >= 0;
+const completionGroup = Symbol('completion group');
+// A grouped swarm suppresses member reports and answers once, through a wake.
+const agentsStarted = ({ toolName, isError, result }) => {
+  const details = result?.details;
+  if (isError || !details) return [];
+  if (toolName === 'spawn_agent') return [details.name];
+  if (toolName !== 'spawn_swarm_agents') return [];
+  const names = (details.spawned ?? []).map(agent => agent.name);
+  return details.completionGroup && names.length ? [completionGroup] : names;
+};
 
 export function buildInvocation(request) {
   if (request.harness !== 'pi') throw Error('Execution requires an explicit Pi binding.');
@@ -79,6 +89,8 @@ export async function runHarness(request, { spawnProcess = spawn, maxOutputBytes
   let stopping = false;
   let killTimer;
   let assistant;
+  // Agents live in this child and report as later turns, so a settled lead may not be finished.
+  const agents = new Set();
   const decoder = new StringDecoder('utf8');
   const terminate = () => {
     if (stopping || exited) return;
@@ -126,10 +138,19 @@ export async function runHarness(request, { spawnProcess = spawn, maxOutputBytes
       assistant = record.message;
       result.text = clean(assistant.content?.filter(part => part.type === 'text').map(part => part.text).join('\n'));
     }
+    if (record.type === 'tool_execution_end') {
+      for (const agent of agentsStarted(record)) agents.add(agent);
+    }
+    if (record.type === 'message_end' && record.message?.customType === 'pi-extended-teams-report') {
+      agents.delete(record.message.details?.name);
+    }
+    if (record.type === 'message_end' && record.message?.customType === 'pi-extended-teams-wake') {
+      agents.delete(completionGroup);
+    }
     if (record.type === 'extension_error') fail(Error(clean(record.error || 'Pi extension handler failed.')));
     if (record.type === 'agent_settled') {
       if (record.aborted === true) fail(Object.assign(Error('Pi agent run was aborted.'), { interrupted: true }));
-      else settled.resolve();
+      else if (!agents.size) settled.resolve();
     }
     onEvent(record);
   };

@@ -356,6 +356,7 @@ test('tick returns before completion, deduplicates and exposes durable full repo
       return new Promise(resolve => { finish = resolve; });
     },
   });
+  await writeFile(join(fixtureData.root, 'memory.md'), '- Rent is due November 1\n');
 
   await runner.tick();
   assert.equal(calls, 1);
@@ -378,6 +379,7 @@ test('tick returns before completion, deduplicates and exposes durable full repo
   });
   assert.equal(envelope.schedule.instructions, fixtureData.schedule.prompt);
   assert.deepEqual(envelope.sources, [{ path: 'source', text: 'Selected source content' }]);
+  assert.deepEqual(envelope.memory, ['Rent is due November 1']);
   const snapshot = await runner.snapshot();
   assert.equal(snapshot.reports[0].text, 'Full findings');
 

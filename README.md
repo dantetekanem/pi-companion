@@ -42,6 +42,8 @@ Colors follow Pi's saved theme. The header shows connection state; the status ba
 
 Ask the agent to run a configured check now, even if its recurring schedule is paused. This runs it once without changing its schedule.
 
+The agent keeps a short list of what matters right now in `memory.md` in the data folder: up to 20 one-line items that it adds, updates and removes as things change. Ask it to remember or forget something, or edit the file yourself. The list stays within Companion, chat sees it on every turn, and scheduled checks can read it but not change it.
+
 ## Add a schedule
 
 Create a Markdown file in `~/.companion/schedules/daily/`, `weekly/` or `monthly/`:

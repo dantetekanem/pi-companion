@@ -442,10 +442,9 @@ const chatEntries = messages => {
   return entries;
 };
 const chatLines = ({ messages, inner, clock, markdown }) => {
-  const entries = chatEntries(messages);
   const content = [];
   let day = null;
-  entries.forEach(({ message, at, latest, repeats }, index) => {
+  chatEntries(messages).forEach(({ message, at, latest, repeats }) => {
     if (at !== null && dayOf(at) !== day) {
       day = dayOf(at);
       content.push(centered(`${faint('──')} ${muted(dayLabel(at, clock))} ${faint('──')}`, inner), '');
@@ -457,8 +456,7 @@ const chatLines = ({ messages, inner, clock, markdown }) => {
       const [glyph, paintGlyph, paintText] = noticeLooks[message.tone] ?? ['◇', muted, dim];
       content.push(...wrapped(label, inner - 9).map((value, part) =>
         part ? `  ${paintText(value)}` : `${paintGlyph(glyph)} ${row(paintText(value), latestTime, inner - 2)}`));
-      const following = entries[index + 1];
-      if (following?.message.role !== 'notice' || dayOf(following.at) !== dayOf(at)) content.push('');
+      content.push('');
       return;
     }
     if (message.role === 'user') {

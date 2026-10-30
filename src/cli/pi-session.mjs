@@ -9,6 +9,7 @@ import { readSettings, updateSettings } from './settings.mjs';
 import { Type } from 'typebox';
 import { Check } from 'typebox/value';
 import { defineTool } from '@earendil-works/pi-coding-agent';
+import { createMemoryExtension, createMemoryTool } from './memory.mjs';
 import { createQuestionTool } from './questions.mjs';
 
 const settingsScope = Type.Union(['main', 'background', 'schedules', 'all'].map(value => Type.Literal(value)));
@@ -75,7 +76,7 @@ export async function openPiSession(
     expected,
     file,
     fresh,
-    customTools: [createQuestionTool(askQuestion), createScheduleTool(triggerSchedule)],
+    customTools: [createQuestionTool(askQuestion), createScheduleTool(triggerSchedule), createMemoryTool(root)],
     modelSettings: { root, config },
   }, dependencies);
 }
@@ -287,7 +288,7 @@ async function openConversation(
   if (expected && manager.getSessionId() !== expected.sessionId) throw Error('Main Pi conversation identity changed.');
   const effectiveAgentDir = agentDir ?? getAgentDir();
   const settingsManager = SettingsManager.create(config.main.cwd, effectiveAgentDir);
-  const appendSystemPrompt = ['prompt', 'taste', 'learning-context', 'v2-runtime'].map(name =>
+  const appendSystemPrompt = ['prompt', 'taste', 'learning-context', 'v2-runtime', 'memory'].map(name =>
     readFileSync(new URL(`../prompts/${name}.md`, import.meta.url), 'utf8').replace('{{runtime}}', JSON.stringify({
       root,
       notes: join(root, 'notes'),
@@ -303,6 +304,7 @@ async function openConversation(
       { name: 'codemode', factory: createCodemodeExtension(), builtin: true, replaceable: true },
       { name: 'tool-search', factory: createToolSearchExtension(), builtin: true, replaceable: true },
       { name: 'mcp', factory: createMcpExtension(), builtin: true, replaceable: true },
+      createMemoryExtension(root),
     ],
     appendSystemPrompt,
   });

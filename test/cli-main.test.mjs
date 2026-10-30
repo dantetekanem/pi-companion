@@ -126,12 +126,86 @@ test('explicit headless command holds one owner until a signal, then closes and 
   });
 
   await started.promise;
+  await new Promise(resolve => setImmediate(resolve));
   h.signals.emit('SIGTERM');
 
   assert.equal(await work, 0);
   assert.equal(closes, 1);
   assert.equal(h.signals.listenerCount('SIGTERM'), 0);
   assert.equal(h.signals.listenerCount('SIGINT'), 0);
+});
+
+test('connected command exits the process only after the application has closed', async t => {
+  const h = fixture(t);
+  const started = Promise.withResolvers();
+  const steps = [];
+  const work = main(['run', '--home', h.root], h.output, {
+    signals: h.signals,
+    input: { isTTY: false },
+    exit: code => { steps.push(`exit ${code}`); },
+    openApplication: async () => {
+      started.resolve();
+      return {
+        close: async () => {
+          await Promise.resolve();
+          steps.push('closed');
+        },
+      };
+    },
+  });
+
+  await started.promise;
+  h.signals.emit('SIGINT');
+  await work;
+
+  assert.deepEqual(steps, ['closed', 'exit 0']);
+});
+
+test('quitting during startup exits cleanly without waiting for the connection', async t => {
+  const h = fixture(t);
+  const started = Promise.withResolvers();
+  const connecting = Promise.withResolvers();
+  const exits = [];
+  const work = main(['run', '--home', h.root], h.output, {
+    signals: h.signals,
+    input: { isTTY: false },
+    exit: code => { exits.push(code); },
+    openApplication: () => {
+      started.resolve();
+      return connecting.promise;
+    },
+  });
+
+  await started.promise;
+  h.signals.emit('SIGINT');
+
+  assert.equal(await work, 0);
+  assert.deepEqual(exits, [0]);
+
+  const closed = Promise.withResolvers();
+  connecting.resolve({ close: async () => { closed.resolve(); } });
+  await closed.promise;
+});
+
+test('a connection that fails after a quit stays silent', async t => {
+  const h = fixture(t);
+  const started = Promise.withResolvers();
+  const connecting = Promise.withResolvers();
+  const work = main(['run', '--home', h.root], h.output, {
+    signals: h.signals,
+    input: { isTTY: false },
+    openApplication: () => {
+      started.resolve();
+      return connecting.promise;
+    },
+  });
+
+  await started.promise;
+  h.signals.emit('SIGINT');
+  assert.equal(await work, 0);
+
+  connecting.reject(Error('This operation was aborted'));
+  await new Promise(resolve => setImmediate(resolve));
 });
 
 test('dashboard paints before connection, wires sends and restores terminal on startup failure', async t => {

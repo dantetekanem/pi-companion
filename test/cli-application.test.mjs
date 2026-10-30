@@ -518,7 +518,7 @@ test('application reset refreshes the connected view after preserving the previo
   app.onChange = view => dashboard.update(view);
   const reset = await app.reset();
   const tools = toolSets.at(-1);
-  assert.deepEqual(tools.map(tool => tool.name), ['ask_question', 'run_schedule', 'model_settings']);
+  assert.deepEqual(tools.map(tool => tool.name), ['ask_question', 'run_schedule', 'companion_memory', 'model_settings']);
   const activeBinding = (await tools.find(tool => tool.name === 'model_settings').execute('binding', {
     action: 'inspect', scope: 'main',
   })).details.activeMainBinding;

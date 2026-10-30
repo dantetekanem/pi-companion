@@ -6,7 +6,7 @@ const MAX_FILE_BYTES = 32768;
 const MAX_PROMPT_BYTES = 65536;
 
 /** Explicit regular-file sources only. This bounds context, not the child's filesystem access. */
-export async function buildContext(schedule, latestOutcome = null) {
+export async function buildContext(schedule, latestOutcome = null, memory = []) {
   const cwd = resolve(schedule.cwd);
   if (await realpath(cwd) !== cwd || !(await lstat(cwd)).isDirectory()) {
     throw Error('cwd must be a real directory without symlinks');
@@ -47,6 +47,7 @@ export async function buildContext(schedule, latestOutcome = null) {
     },
     schedule: { id: schedule.id, title: schedule.title, instructions: schedule.prompt },
     sources,
+    memory,
     latestOutcome: latestOutcome ? {
       status: latestOutcome.status,
       text: String(latestOutcome.result?.text ?? '').slice(0, 4096),

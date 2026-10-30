@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Add Companion-only memory: a short list in `memory.md` that the agent maintains. Chat sees it on every turn; scheduled checks can read it but not change it.
+- Keep scheduled checks running until every agent they spawned has reported, so a check no longer finishes with its interim reply as the report.
+- Exit as soon as Companion has closed, so a leftover connection cannot delay quitting.
+- Separate report notices in Chat with a blank line.
+
 ## 0.1.6 - 2026-10-29
 
 - Add `pi-companion reports` to list reports and `pi-companion reports delete ID...` to remove selected reports.

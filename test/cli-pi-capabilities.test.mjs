@@ -88,13 +88,16 @@ test('main conversation uses Pi tools and MCP with native extension lifecycle', 
   const session = await runtime.connect();
 
   const activeTools = session.getActiveToolNames();
-  for (const name of ['read', 'bash', 'edit', 'write', 'ordinary_capability', 'codemode', 'tool_search']) {
+  for (const name of ['read', 'bash', 'edit', 'write', 'ordinary_capability', 'codemode', 'tool_search', 'companion_memory']) {
     assert.ok(activeTools.includes(name), `${name} should be available like normal Pi`);
   }
   assert.equal(readFileSync(started, 'utf8'), 'start\n');
   modelRuntime.checkAuth = async () => ({ available: true });
   modelRuntime.hasConfiguredAuth = () => false;
+  writeFileSync(join(root, 'memory.md'), '- Rent is due November 1\n');
+  let modelRequest;
   session.agent.streamFunction = (_model, context) => {
+    modelRequest = JSON.stringify(context);
     const answered = context.messages.at(-1).role === 'toolResult';
     const message = {
       role: 'assistant',
@@ -125,6 +128,7 @@ test('main conversation uses Pi tools and MCP with native extension lifecycle', 
   assert.ok(reply, 'the synthetic model issued the codemode call');
   assert.notEqual(reply.isError, true, JSON.stringify(reply.content));
   assert.match(JSON.stringify(reply.content), /fixture-pong/);
+  assert.match(modelRequest, /## Current memory\\n\\n- Rent is due November 1/);
 
   await runtime.send('/fixture-command', 'command');
   await runtime.idle();

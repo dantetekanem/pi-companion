@@ -133,6 +133,98 @@ test('Pi checks effective model and thinking before submission and returns sessi
   assert.equal(calls[0].args[calls[0].args.indexOf('--thinking') + 1], 'high');
 });
 
+const teamEvents = `
+  const say = text => send({
+    type: 'message_end',
+    message: { role: 'assistant', stopReason: 'stop', content: [{ type: 'text', text }] },
+  });
+  const started = (toolName, details, isError = false) => send({
+    type: 'tool_execution_end',
+    toolName,
+    isError,
+    result: { content: [], details },
+  });
+  const delivered = (customType, details) => send({
+    type: 'message_end',
+    message: { role: 'custom', customType, content: 'Agent result.', display: false, details },
+  });
+  const settled = () => send({ type: 'agent_settled' });
+  const later = step => setTimeout(step, 20);
+`;
+
+test('a job waits for a spawned agent report instead of saving the interim reply', async t => {
+  const program = rpc(`${teamEvents}
+    started('spawn_agent', { name: 'reader' });
+    say('The check is underway.');
+    settled();
+    later(() => {
+      delivered('pi-extended-teams-report', { name: 'reader', ok: true });
+      say('Useful: final report.');
+      settled();
+    });
+  `);
+
+  const result = await runHarness(request(t), { spawnProcess: fake(program) });
+
+  assert.equal(result.status, 'completed');
+  assert.equal(result.text, 'Useful: final report.');
+});
+
+test('a job stays alive until every spawned agent has reported', async t => {
+  const program = rpc(`${teamEvents}
+    started('spawn_swarm_agents', { spawned: [{ name: 'one' }, { name: 'two' }], failed: [] });
+    say('Both are running.');
+    settled();
+    later(() => {
+      delivered('pi-extended-teams-report', { name: 'one', ok: true });
+      say('Still waiting for two.');
+      settled();
+      later(() => {
+        delivered('pi-extended-teams-report', { name: 'two', ok: false });
+        say('Useful: both reported.');
+        settled();
+      });
+    });
+  `);
+
+  const result = await runHarness(request(t), { spawnProcess: fake(program) });
+
+  assert.equal(result.text, 'Useful: both reported.');
+});
+
+test('a grouped swarm finishes on its group wake because member reports are suppressed', { timeout: 3000 }, async t => {
+  const program = rpc(`${teamEvents}
+    started('spawn_swarm_agents', {
+      spawned: [{ name: 'one' }, { name: 'two' }],
+      failed: [],
+      completionGroup: { groupId: 'group-1' },
+    });
+    say('The group is running.');
+    settled();
+    later(() => {
+      delivered('pi-extended-teams-wake');
+      say('Useful: group finished.');
+      settled();
+    });
+  `);
+
+  const result = await runHarness(request(t), { spawnProcess: fake(program) });
+
+  assert.equal(result.text, 'Useful: group finished.');
+});
+
+test('a failed spawn leaves nothing to wait for', { timeout: 3000 }, async t => {
+  const program = rpc(`${teamEvents}
+    started('spawn_agent', undefined, true);
+    say('Useful: the agent could not start.');
+    settled();
+  `);
+
+  const result = await runHarness(request(t), { spawnProcess: fake(program) });
+
+  assert.equal(result.text, 'Useful: the agent could not start.');
+});
+
 test('Pi RPC extension errors fail the run without discarding the completed answer', async t => {
   const result = await runHarness(request(t), { spawnProcess: fake(rpc(`
     send({ type: 'message_end', message: { role: 'assistant', stopReason: 'stop', content: [{ type: 'text', text: 'Answer retained' }] } });

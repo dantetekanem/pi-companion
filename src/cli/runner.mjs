@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { loadSchedules, scheduleTimes } from './schedules.mjs';
 import { runHarness as defaultRunHarness } from './harnesses.mjs';
 import { buildContext } from './context.mjs';
+import { readMemory } from './memory.mjs';
 
 function partsAt(formatter, time) {
   return Object.fromEntries(formatter.formatToParts(time)
@@ -209,7 +210,7 @@ export class CompanionRunner {
     const previous = Object.values(state.runs)
       .filter(run => run.scheduleId === schedule.id && run.status !== 'running')
       .sort((a, b) => (b.scheduledAt ?? '').localeCompare(a.scheduledAt ?? ''))[0];
-    const prompt = await buildContext(schedule, previous);
+    const prompt = await buildContext(schedule, previous, readMemory(this.root));
     const id = randomUUID();
     const directory = join(this.root, 'jobs');
     await mkdir(directory, { recursive: true, mode: 0o700 });

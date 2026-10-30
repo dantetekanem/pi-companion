@@ -20,7 +20,7 @@ function reportDirectory(root) {
   return directory;
 }
 
-function writePrivate(file, body) {
+export function writePrivate(file, body) {
   const temporary = `${file}.${randomUUID()}.tmp`;
   try {
     const fd = openSync(temporary, 'wx', 0o600);

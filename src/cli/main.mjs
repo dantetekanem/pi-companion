@@ -61,11 +61,16 @@ async function connected(options, snapshot, output, dependencies) {
       output.write('Pi Companion running in this process. SIGINT/SIGTERM stops owned work.\n');
     }
     const open = dependencies.openApplication ?? (await import('./application.mjs')).CompanionApplication.open;
-    app = await open(options.root, {
+    const opening = open(options.root, {
       signal: cancellation.signal,
       onChange: view => dashboard?.update(view),
       askQuestion: (request, signal) => dashboard?.askQuestion(request, signal),
+    }).then(opened => {
+      app = opened;
+      if (cancellation.signal.aborted) return opened.close();
     });
+    // A quit never waits for startup. Exit hooks release the lock and stop MCP servers.
+    await Promise.race([opening, done.promise]);
     await done.promise;
     return 0;
   } finally {
@@ -169,7 +174,10 @@ export async function main(args = process.argv.slice(2), output = process.stdout
   const snapshot = readLocalView(options.root);
   const { config, schedules, counts, errors, usage } = snapshot;
   if (connect) {
-    return connected(options, snapshot, output, dependencies);
+    const code = await connected(options, snapshot, output, dependencies);
+    // Extension handles can outlive close(); Pi's own quit exits the same way.
+    dependencies.exit?.(code);
+    return code;
   }
   output.write(`Pi Companion · ${options.root}\nDaily ${counts.daily} · Weekly ${counts.weekly} · Monthly ${counts.monthly} · Migrated ${counts.compatibility ?? 0}\n`);
   output.write(`Background ${config.background.harness} · ${config.background.effort} · ${config.background.model ?? 'configured default'}\n`);
@@ -185,7 +193,7 @@ export async function main(args = process.argv.slice(2), output = process.stdout
 }
 
 if (import.meta.main) {
-  main().then(code => { process.exitCode = code; }).catch(error => {
+  main(undefined, undefined, { exit: process.exit }).then(code => { process.exitCode = code; }).catch(error => {
     process.stderr.write(`Pi Companion: ${error.message}\n`);
     if (error.diagnostics) process.stderr.write(`${JSON.stringify(error.diagnostics, null, 2)}\n`);
     process.exitCode = 1;
