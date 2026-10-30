@@ -1,1 +1,7 @@
-Companion's daily reflection has finished. If Companion is still running, use its current recorded experience and relevant authorized notes to apply worthwhile pending decisions through the existing tools. Check current state and permissions, preserve explicit stops, record the resulting receipts, and define what later outcomes would test the change. Ask or publish a useful question when missing context matters. Do not turn this into a user review or maintenance task, repeat unchanged questions, or send a no-news update. If Companion is stopped, do nothing.
+If this Companion owner is stopped, do nothing. Otherwise, check pending reflection decisions against current state.
+
+Apply only changes covered by existing permissions and available tools. Recommendations do not authorize new schedules, providers, sources or actions. Preserve explicit stops and unrelated work. Check receipts before repeating operations; reconcile interrupted or uncertain work instead of retrying automatically.
+
+In the Pi extension, read the current registry, use scheduler tools in the owning session, and record applied decisions through `companion_record` with scheduler evidence and a success signal. In the CLI, edit schedule files directly and keep decision references private. Do not clone CLI schedules into another scheduler or use an agent to register them. Leave unsupported proposals pending with a reason.
+
+Ask one useful question when it changes the next action. The extension records questions and supported feed publications through `companion_record`; the CLI uses the caller's report channel without tracking comments. Do not repeat unchanged questions, require the user to administer reflection, or publish no-news updates.

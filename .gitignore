@@ -6,8 +6,17 @@
 !/test/
 /src/*
 !/src/*.ts
+!/src/*.mjs
 !/src/prompts/
+!/src/cli/
+!/docs/
+/docs/*
+!/docs/*.md
+!/docs/images/
+/docs/images/*
+!/docs/images/companion-cli.png
 /src/prompts/*
 !/src/prompts/*.md
 /test/*
 !/test/*.mjs
+!/test/helpers/
