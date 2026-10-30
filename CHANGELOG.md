@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.6 - 2026-10-29
+
+- Add `pi-companion reports` to list reports and `pi-companion reports delete ID...` to remove selected reports.
+- Refresh the live dashboard after deletion and keep deleted reports out of saved and imported listings. Preserve run receipts so deletion does not replay completed checks.
+
 ## 0.1.5 - 2026-10-29
 
 - Add the standalone `pi-companion` CLI with persistent chat, Markdown reports, live job tabs and Pi themes.

@@ -277,3 +277,29 @@ test('plain status never opens an application even on a TTY', async t => {
   assert.equal(code, 0);
   assert.match(h.output.text, /Main not connected/);
 });
+
+test('reports lists the whole inventory and delete removes only known reports', async t => {
+  const h = fixture(t);
+  const report = (id, at) => ({ id, title: id, body: `Body ${id}`, at, outcome: 'completed' });
+  mkdirSync(join(h.root, 'runtime'), { mode: 0o700 });
+  writeFileSync(join(h.root, 'runtime/view.json'), JSON.stringify({
+    version: 1,
+    reports: [
+      report('check:2026-01-01', '2026-01-01T09:00:00Z'),
+      report('check:2026-01-08', '2026-01-08T09:00:00Z'),
+    ],
+  }));
+
+  assert.equal(await main(['reports', '--home', h.root], h.output), 0);
+  const listed = JSON.parse(h.output.text).map(item => item.id);
+  assert.deepEqual(listed, ['check:2026-01-08', 'check:2026-01-01']);
+
+  const withUnknown = main(['reports', 'delete', 'check:2026-01-01', 'missing', '--home', h.root], h.output);
+  await assert.rejects(withUnknown, /missing/);
+
+  h.output.text = '';
+  assert.equal(await main(['reports', 'delete', 'check:2026-01-01', '--home', h.root], h.output), 0);
+  assert.deepEqual(JSON.parse(h.output.text), { deleted: ['check:2026-01-01'], before: 2, after: 1 });
+
+  await assert.rejects(main(['status', 'extra', '--home', h.root], h.output), /Unknown/);
+});

@@ -20,10 +20,7 @@ function reportDirectory(root) {
   return directory;
 }
 
-export function saveReport(root, id, body) {
-  if (typeof body !== 'string' || Buffer.byteLength(body) > 16777216) throw Error('Report must be bounded Markdown text.');
-  mkdirSync(reportDirectory(root), { recursive: true, mode: 0o700 });
-  const file = reportPath(root, id);
+function writePrivate(file, body) {
   const temporary = `${file}.${randomUUID()}.tmp`;
   try {
     const fd = openSync(temporary, 'wx', 0o600);
@@ -40,6 +37,12 @@ export function saveReport(root, id, body) {
   return file;
 }
 
+export function saveReport(root, id, body) {
+  if (typeof body !== 'string' || Buffer.byteLength(body) > 16777216) throw Error('Report must be bounded Markdown text.');
+  mkdirSync(reportDirectory(root), { recursive: true, mode: 0o700 });
+  return writePrivate(reportPath(root, id), body);
+}
+
 export function readReport(root, id, fallback) {
   reportDirectory(root);
   const file = reportPath(root, id);
@@ -47,4 +50,30 @@ export function readReport(root, id, fallback) {
   if (!stat) return fallback;
   if (!stat.isFile() || (stat.mode & 0o077) || stat.size > 16777216) throw Error('Saved report must be a private bounded regular file.');
   return readFileSync(file, 'utf8');
+}
+
+const deletedPath = root => join(root, 'runtime', 'deleted-reports.json');
+
+/** Deleted report IDs hide reports from every inventory source; run receipts stay to prevent replays. */
+export function deletedReportIds(root) {
+  const file = deletedPath(root);
+  const stat = statOrMissing(file);
+  if (!stat) return new Set();
+  if (!stat.isFile() || (stat.mode & 0o077) || stat.size > 16777216) throw Error('Deleted reports must be a private bounded regular file.');
+  const saved = JSON.parse(readFileSync(file, 'utf8'));
+  if (saved?.version !== 1 || !Array.isArray(saved.ids) || saved.ids.some(id => typeof id !== 'string' || !id)) {
+    throw Error('Invalid deleted report list.');
+  }
+  return new Set(saved.ids);
+}
+
+export function deleteReports(root, ids) {
+  const deleted = deletedReportIds(root);
+  for (const id of ids) {
+    deleted.add(id);
+    rmSync(reportPath(root, id), { force: true });
+  }
+  mkdirSync(join(root, 'runtime'), { recursive: true, mode: 0o700 });
+  writePrivate(deletedPath(root), `${JSON.stringify({ version: 1, ids: [...deleted] }, null, 2)}\n`);
+  return deleted;
 }

@@ -1,3 +1,4 @@
+import { watch } from 'node:fs';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { CompanionRuntime } from './runtime.mjs';
@@ -7,7 +8,7 @@ import { CompatibilityDelivery } from './compatibility.mjs';
 import { UsageLedger } from './usage.mjs';
 import { atomicJson, loadConfig } from './config.mjs';
 import { readLocalView } from './view.mjs';
-import { readReport, reportText } from './reports.mjs';
+import { deletedReportIds, readReport, reportText } from './reports.mjs';
 export { readLocalView } from './view.mjs';
 
 const textOf = message => reportText(typeof message.content === 'string' ? message.content
@@ -91,6 +92,11 @@ export class CompanionApplication {
       });
       signal?.throwIfAborted();
       app.runner.start({ intervalMs });
+      // `pi-companion reports delete` runs in another process and changes no runtime state.
+      app.deletionWatcher = watch(join(app.runtime.directory, 'runtime'), (event, name) => {
+        if (name?.startsWith('deleted-reports.json')) app.requestRefresh();
+      });
+      app.deletionWatcher.unref();
       await app.refresh();
       return app;
     } catch (error) {
@@ -129,8 +135,10 @@ export class CompanionApplication {
     const state = await this.runtime.state();
     const loaded = await this.runner.snapshot();
     const runs = Object.values(state.runs).sort((a, b) => (b.startedAt ?? '').localeCompare(a.startedAt ?? ''));
+    const deleted = deletedReportIds(this.runtime.directory);
     const reports = runs
       .filter(run => run.kind !== 'main' && run.status !== 'running' && (run.status !== 'no_change' || run.trigger === 'manual'))
+      .filter(run => !deleted.has(run.id))
       .map(run => {
         const text = run.result?.text || run.result?.error || run.error || 'No result text.';
         const coverage = run.result?.coverage
@@ -139,6 +147,7 @@ export class CompanionApplication {
         return {
           id: run.id,
           title: run.title ?? run.scheduleId ?? run.id,
+          scheduleId: run.scheduleId,
           at: run.finishedAt,
           body: readReport(this.runtime.directory, run.id, reportText(text + coverage)),
           outcome: run.status,
@@ -189,7 +198,7 @@ export class CompanionApplication {
     const visible = {
       version: 1,
       savedAt: new Date().toISOString(),
-      reports: [...reports, ...this.snapshot.history.reports].slice(0, 200),
+      reports: [...reports, ...this.snapshot.history.reports.filter(report => !deleted.has(report.id))].slice(0, 200),
       messages,
       context: this.runtime.contextInfo(),
       runs: [
@@ -287,6 +296,7 @@ export class CompanionApplication {
     if (!this.closing) {
       this.closing = (async () => {
         clearTimeout(this.refreshTimer);
+        this.deletionWatcher?.close();
         try {
           await this.runner?.stop();
           await this.delivery?.close();

@@ -5,7 +5,7 @@ import { resolveDataRoot } from './migration/admission.mjs';
 import { loadSchedules } from './schedules.mjs';
 import { loadImportedHistory } from './history.mjs';
 import { UsageLedger } from './usage.mjs';
-import { readReport } from './reports.mjs';
+import { deletedReportIds, readReport } from './reports.mjs';
 
 const presentationPath = requestedRoot => join(resolveDataRoot(requestedRoot), 'runtime', 'presentation.json');
 const normalizeMessageIds = value => {
@@ -60,8 +60,9 @@ export function readLocalView(requestedRoot) {
     saved = JSON.parse(readFileSync(file, 'utf8'));
     if (saved.version !== 1) throw Error('Unsupported saved dashboard.');
   }
+  const deleted = deletedReportIds(root);
   const reports = [...new Map([...(saved.reports ?? []), ...history.reports]
-    .filter(report => report.id !== 'patterns-offer')
+    .filter(report => report.id !== 'patterns-offer' && !deleted.has(report.id))
     .map(report => [report.id, { ...report, body: readReport(root, report.id, report.body) }])).values()]
     .sort((a, b) => Date.parse(b.at) - Date.parse(a.at));
   const presentation = readPresentationState(root);

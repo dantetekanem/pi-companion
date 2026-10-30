@@ -3,10 +3,11 @@ import { resolve } from 'node:path';
 import { defaultRoot, initialize, legacySources } from './config.mjs';
 import { loadImportedHistory } from './history.mjs';
 import { readLocalView, savePresentationState } from './view.mjs';
+import { deleteReports } from './reports.mjs';
 
 export function parseArguments(args) {
   const values = [...args];
-  const options = { command: 'status', root: resolve(defaultRoot()), explicitRoot: false, plain: false };
+  const options = { command: 'status', root: resolve(defaultRoot()), explicitRoot: false, plain: false, args: [] };
   if (values[0] && !values[0].startsWith('-')) options.command = values.shift();
   while (values.length) {
     const flag = values.shift();
@@ -17,6 +18,7 @@ export function parseArguments(args) {
       options[flag.slice(2)] = values.shift();
     } else if (flag === '--plain') options.plain = true;
     else if (flag === '--help' || flag === '-h') options.command = 'help';
+    else if (options.command === 'reports' && !flag.startsWith('-')) options.args.push(flag);
     else throw Error(`Unknown or incomplete option: ${flag}`);
   }
   return options;
@@ -78,7 +80,7 @@ async function connected(options, snapshot, output, dependencies) {
 export async function main(args = process.argv.slice(2), output = process.stdout, dependencies = {}) {
   const options = parseArguments(args);
   if (options.command === 'help') {
-    output.write('Pi Companion\nUsage: pi-companion [command] [options]\n  init | schedules | status | history | run  [--home directory] [--plain]\n  patterns-preview --selection file\n  patterns-submit --preview HASH --confirm HASH\n  upgrade-plan --selection file\n  upgrade-prepare --selection plan.json --confirm HASH\n  upgrade-apply --confirm MIGRATION_ID [--selection authorization.json]\n  upgrade-status\n');
+    output.write('Pi Companion\nUsage: pi-companion [command] [options]\n  init | schedules | status | history | run  [--home directory] [--plain]\n  patterns-preview --selection file\n  patterns-submit --preview HASH --confirm HASH\n  upgrade-plan --selection file\n  upgrade-prepare --selection plan.json --confirm HASH\n  upgrade-apply --confirm MIGRATION_ID [--selection authorization.json]\n  upgrade-status\n  reports [delete ID...]  list the Reports inventory as JSON, or delete reports by ID\n');
     return 0;
   }
   if (options.command.startsWith('upgrade-')) {
@@ -131,6 +133,29 @@ export async function main(args = process.argv.slice(2), output = process.stdout
       signals.removeListener('SIGINT', cancel);
       signals.removeListener('SIGTERM', cancel);
     }
+  }
+  if (options.command === 'reports') {
+    const inventory = () => readLocalView(options.root).reports;
+    if (!options.args.length) {
+      output.write(`${JSON.stringify(inventory(), null, 2)}\n`);
+      return 0;
+    }
+    const [action, ...ids] = options.args;
+    if (action !== 'delete' || !ids.length) throw Error('Usage: pi-companion reports [delete ID...]');
+
+    const before = inventory();
+    const known = new Set(before.map(report => report.id));
+    const unknown = ids.filter(id => !known.has(id));
+    if (unknown.length) throw Error(`Unknown report IDs; nothing deleted: ${unknown.join(', ')}`);
+
+    deleteReports(options.root, ids);
+    const result = {
+      deleted: [...new Set(ids)],
+      before: before.length,
+      after: inventory().length,
+    };
+    output.write(`${JSON.stringify(result, null, 2)}\n`);
+    return 0;
   }
   if (options.command === 'history') {
     output.write(`${JSON.stringify(loadImportedHistory(options.root), null, 2)}\n`);

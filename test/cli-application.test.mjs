@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { initialize, atomicJson } from '../src/cli/config.mjs';
 import { CompanionApplication, readLocalView } from '../src/cli/application.mjs';
 import { CompanionRuntime } from '../src/cli/runtime.mjs';
-import { saveReport } from '../src/cli/reports.mjs';
+import { deleteReports, saveReport } from '../src/cli/reports.mjs';
 import { readPresentationState, savePresentationState } from '../src/cli/view.mjs';
 import { fakePi } from './helpers/pi-session.mjs';
 import { createDashboard } from '../src/cli/ui.mjs';
@@ -704,4 +704,67 @@ test('maximum-size reports stay file-backed outside the dashboard cache and are 
   assert.equal(calls, 0);
   await reopened.close();
   assert.equal(calls, 0);
+});
+
+test('deleted reports leave the live view, the saved view and restarts while run receipts stay', async t => {
+  const h = fixture(t);
+  const imported = {
+    id: 'imported:old',
+    title: 'Imported',
+    body: 'Old',
+    at: '2025-12-01T00:00:00Z',
+    outcome: 'imported',
+    origin: 'legacy-state',
+    path: '/prior/report.json',
+  };
+  atomicJson(join(h.root, 'runtime/imported-reports.json'), { version: 1, reports: [imported] });
+  const oldRun = 'weekly-check:2026-01-02';
+  const newRun = 'weekly-check:2026-01-09';
+
+  const app = await h.openApp();
+  try {
+    await app.runtime.change(state => {
+      state.runs[oldRun] = backgroundRun(oldRun, { scheduleId: 'weekly-check' });
+      state.runs[newRun] = backgroundRun(newRun, { scheduleId: 'weekly-check' });
+    });
+    const before = await app.refresh();
+    assert.equal(before.reports.find(report => report.id === newRun).scheduleId, 'weekly-check');
+    saveReport(h.root, oldRun, '# Old report');
+
+    deleteReports(h.root, [oldRun, 'imported:old']);
+
+    const after = await app.refresh();
+    assert.deepEqual(after.reports.map(report => report.id), [newRun]);
+    assert.ok((await app.runtime.state()).runs[oldRun]);
+  } finally {
+    await app.close();
+  }
+  assert.deepEqual(readLocalView(h.root).reports.map(report => report.id), [newRun]);
+  assert.deepEqual(readdirSync(join(h.root, 'reports')), []);
+});
+
+test('a deletion from another process recounts the running view without a state change', async t => {
+  const h = fixture(t);
+  const recounted = Promise.withResolvers();
+  let deleted = false;
+  const app = await h.openApp({
+    onChange: view => {
+      if (deleted && view.reports.length === 0) recounted.resolve();
+    },
+  });
+  try {
+    await app.runtime.change(state => {
+      state.runs['daily-check:2026-01-02'] = backgroundRun('daily-check:2026-01-02');
+    });
+    assert.equal((await app.refresh()).reports.length, 1);
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    deleteReports(h.root, ['daily-check:2026-01-02']);
+    deleted = true;
+
+    const timeout = setTimeout(() => recounted.reject(Error('View was not recounted.')), 2000);
+    await recounted.promise.finally(() => clearTimeout(timeout));
+  } finally {
+    await app.close();
+  }
 });
