@@ -4,7 +4,7 @@ import { mkdtempSync, writeFileSync, appendFileSync, readFileSync, rmSync } from
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createHash } from 'node:crypto';
-import { initialize } from '../src/cli/config.mjs';
+import { atomicJson, initialize, loadConfig } from '../src/cli/config.mjs';
 import { previewPatterns, submitPatterns } from '../src/cli/patterns.mjs';
 import { readLocalView } from '../src/cli/view.mjs';
 import { buildInvocation } from '../src/cli/harnesses.mjs';
@@ -91,6 +91,29 @@ test('Claude destinations reject fresh and saved previews before submission with
   await assert.rejects(submitPatterns(h.root, { hash, confirmation: hash, run: () => { calls++; } }), /harness.*pi/);
   assert.equal(calls, 0);
   assert.equal(readFileSync(path, 'utf8'), saved);
+});
+
+test('the configured launcher starts the pattern review, and no launcher adds nothing to the request', async t => {
+  const h = fixture(t);
+  const requests = [];
+  const run = async request => {
+    requests.push(request);
+    return { status: 'completed', text: 'Proposal.', sessionId: request.id, freshSession: true, cost: null };
+  };
+  const plain = previewPatterns(h.root, h.selection);
+  await submitPatterns(h.root, { hash: plain.hash, confirmation: plain.hash, run });
+  assert.equal('launcher' in requests[0], false);
+  assert.equal(buildInvocation(requests[0]).command, 'pi');
+
+  const launcher = { command: ['my-pi-launcher', 'pi'], env: { EXAMPLE_MODE: '1' }, managedExtensions: true };
+  atomicJson(join(h.root, 'config.json'), { ...loadConfig(h.root), launcher });
+  const next = previewPatterns(h.root, { ...h.selection, to: '2026-01-04' });
+  await submitPatterns(h.root, { hash: next.hash, confirmation: next.hash, run });
+  assert.deepEqual(requests[1].launcher, launcher);
+  const invocation = buildInvocation(requests[1]);
+  assert.equal(invocation.command, 'my-pi-launcher');
+  assert.ok(invocation.args.includes('--no-tools'));
+  assert.ok(!invocation.args.includes('--no-extensions'));
 });
 
 test('Pi pattern review disables tools', () => {

@@ -352,6 +352,20 @@ test('plain status never opens an application even on a TTY', async t => {
   assert.match(h.output.text, /Main not connected/);
 });
 
+test('plain status shows the main binding and a configured launcher', async t => {
+  const h = fixture(t);
+  const file = join(h.root, 'config.json');
+  const config = JSON.parse(readFileSync(file, 'utf8'));
+  writeFileSync(file, JSON.stringify({
+    ...config,
+    main: { ...config.main, model: 'provider/main-model', effort: 'low' },
+    launcher: { command: ['my-pi-launcher', 'pi'], env: { EXAMPLE_MODE: '1' }, managedExtensions: true },
+  }));
+  assert.equal(await main(['status', '--plain', '--home', h.root], h.output), 0);
+  assert.match(h.output.text, new RegExp(`Main low \u00b7 provider/main-model \u00b7 ${h.root}`));
+  assert.match(h.output.text, /Launcher my-pi-launcher pi \u00b7 managed extensions/);
+});
+
 test('reports lists the whole inventory and delete removes only known reports', async t => {
   const h = fixture(t);
   const report = (id, at) => ({ id, title: id, body: `Body ${id}`, at, outcome: 'completed' });

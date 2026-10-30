@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- Add an optional `launcher` setting. With it, every Pi process starts through the configured command: the main chat as an RPC child that keeps Companion's tools, and checks, reflection, pattern review and repair. `managedExtensions` skips `--no-extensions` for installations that refuse it. Without `launcher`, nothing changes.
+- Show the main binding and any launcher in `pi-companion status`.
+- Read large Pi output records in linear time, stop Pi children when Companion exits, and decline extension dialogs in unattended checks instead of waiting.
+- Add one-time schedules: files in `schedules/once/` with a required `date`. They run once at their local time, catch up after downtime, never repeat, and show as done. Status and the dashboard count them.
+- Let weekly schedules take a list of weekdays, such as `[1, 2, 3, 4, 5]` for Monday to Friday.
+- Migrate a home that has no pi-scheduler records without installing the scheduler package. A saved daily wake that was never scheduled no longer blocks migration.
+- Accept saved sessions up to 256 MiB in migration, and check the main conversation's identity from its header line at startup, so long-running conversations keep starting.
 - Add Companion-only memory: a short list in `memory.md` that the agent maintains. Chat sees it on every turn; scheduled checks can read it but not change it.
 - Give each check a `memory.md` it maintains and a Companion-written `log.md` under `checks/<id>/`, both supplied to every run, so checks stop rediscovering their tools and reconstructing their history from transcripts and the database.
 - Add a `Blocked:` report line and stop retrying stuck checks. After two blocked or failed runs in a row, a check is held and tries again after 1, 2, 4, then 7 days. A working run or a schedule edit clears the hold, and manual runs still work.

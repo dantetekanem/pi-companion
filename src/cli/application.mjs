@@ -5,6 +5,7 @@ import { CompanionRuntime } from './runtime.mjs';
 import { CompanionRunner } from './runner.mjs';
 import { JobActivity } from './job-activity.mjs';
 import { CompatibilityDelivery } from './compatibility.mjs';
+import { runHarness as defaultRunHarness } from './harnesses.mjs';
 import { UsageLedger } from './usage.mjs';
 import { atomicJson, loadConfig } from './config.mjs';
 import { readLocalView } from './view.mjs';
@@ -47,6 +48,12 @@ export class CompanionApplication {
     const app = new CompanionApplication();
     app.onChange = onChange;
     app.config = loadConfig(root);
+    // Every job starts its Pi through the configured launcher; without one the request is untouched.
+    const { launcher } = app.config;
+    if (launcher) {
+      const run = runHarness ?? defaultRunHarness;
+      runHarness = (request, options) => run({ ...request, launcher }, options);
+    }
     app.snapshot = readLocalView(root);
     app.runtime = await CompanionRuntime.open(root, app.config, {
       createMain,
@@ -212,7 +219,9 @@ export class CompanionApplication {
         })),
       ],
       lastTick: loaded.lastTick,
-      error: loaded.error,
+      error: this.runtime.mainFault
+        ? `Main chat stopped: ${this.runtime.mainFault.message} Restart Companion to reconnect; scheduled checks keep running.`
+        : loaded.error,
     };
     const saved = {
       ...visible,

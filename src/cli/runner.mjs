@@ -1,7 +1,7 @@
 import { randomUUID, createHash } from 'node:crypto';
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import { loadSchedules, scheduleTimes } from './schedules.mjs';
+import { loadSchedules, scheduleDate, scheduleTimes } from './schedules.mjs';
 import { runHarness as defaultRunHarness } from './harnesses.mjs';
 import { buildContext } from './context.mjs';
 import { readMemory } from './memory.mjs';
@@ -32,7 +32,8 @@ function calendarFormatter(timeZone) {
 function matchesDate(schedule, date) {
   const weekday = new Date(Date.UTC(date.year, date.month - 1, date.day)).getUTCDay();
   return schedule.cadence === 'daily'
-    || (schedule.cadence === 'weekly' && schedule.weekday === weekday)
+    || (schedule.cadence === 'once' && schedule.date === `${date.year}-${String(date.month).padStart(2, '0')}-${String(date.day).padStart(2, '0')}`)
+    || (schedule.cadence === 'weekly' && [schedule.weekday].flat().includes(weekday))
     || (schedule.cadence === 'monthly' && schedule.day === date.day);
 }
 
@@ -55,16 +56,17 @@ function occurrenceAt(schedule, formatter, date, at) {
   return { id, scheduledAt: new Date(due).toISOString(), localDate };
 }
 
-/** Only the latest due time today is eligible; older missed checks are never replayed. */
+/** Only the latest due time today is eligible; older missed checks are never replayed. A once file keeps its date eligible however late. */
 export function dueOccurrence(schedule, now = new Date(), { notBefore = null } = {}) {
   if (!schedule.enabled) return null;
   const instant = new Date(now).getTime();
   if (!Number.isFinite(instant)) throw Error('Invalid scheduler time');
   const formatter = calendarFormatter(schedule.timezone);
-  const today = partsAt(formatter, instant);
+  const once = schedule.cadence === 'once';
+  const today = once ? scheduleDate(schedule.date) : partsAt(formatter, instant);
   if (!matchesDate(schedule, today)) return null;
   const localTime = `${String(today.hour).padStart(2, '0')}:${String(today.minute).padStart(2, '0')}`;
-  if (schedule.window && localTime > schedule.window.end) return null;
+  if (!once && schedule.window && localTime > schedule.window.end) return null;
   for (const at of scheduleTimes(schedule).reverse()) {
     const occurrence = occurrenceAt(schedule, formatter, today, at);
     if (!occurrence || Date.parse(occurrence.scheduledAt) > instant) continue;
@@ -83,10 +85,12 @@ export function nextOccurrence(schedule, now = new Date(), { runs = [], notBefor
   const formatter = calendarFormatter(schedule.timezone);
   const today = partsAt(formatter, boundary);
   const midnight = Date.UTC(today.year, today.month - 1, today.day);
+  const once = schedule.cadence === 'once';
   // Two months cover the longest gap between valid monthly dates (for example, the 31st).
-  for (let offset = 0; offset <= 62; offset++) {
+  for (let offset = 0; offset <= (once ? 0 : 62); offset++) {
     const day = new Date(midnight + offset * 86400000);
-    const date = { year: day.getUTCFullYear(), month: day.getUTCMonth() + 1, day: day.getUTCDate() };
+    const date = once ? scheduleDate(schedule.date)
+      : { year: day.getUTCFullYear(), month: day.getUTCMonth() + 1, day: day.getUTCDate() };
     if (!matchesDate(schedule, date)) continue;
     for (const at of scheduleTimes(schedule)) {
       const occurrence = occurrenceAt(schedule, formatter, date, at);
@@ -108,7 +112,7 @@ export class CompanionRunner {
         // Activity previews are best-effort and cannot fail scheduled work.
       }
     };
-    this.loaded = { schedules: [], errors: [], counts: { daily: 0, weekly: 0, monthly: 0 } };
+    this.loaded = { schedules: [], errors: [], counts: { daily: 0, weekly: 0, monthly: 0, once: 0 } };
     this.jobs = new Map();
     this.legacySessions = new Set();
     this.stopped = false;
@@ -357,9 +361,12 @@ export class CompanionRunner {
           if (hold) {
             const resumesAt = next && Date.parse(next.scheduledAt) > Date.parse(hold.until) ? next.scheduledAt : hold.until;
             nextRun = { state: 'held', at: resumesAt, reason: hold.reason };
+          } else if (next) {
+            nextRun = { state: 'scheduled', at: next.scheduledAt };
+          } else if (schedule.cadence !== 'once') {
+            nextRun = { state: 'blocked', at: null, reason: 'no_occurrence_in_forecast' };
           } else {
-            nextRun = next ? { state: 'scheduled', at: next.scheduledAt }
-              : { state: 'blocked', at: null, reason: 'no_occurrence_in_forecast' };
+            nextRun = { state: related.some(run => run.trigger !== 'manual') ? 'done' : 'expired', at: null };
           }
         }
       }

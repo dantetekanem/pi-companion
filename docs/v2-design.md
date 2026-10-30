@@ -6,6 +6,8 @@ Companion owns a persistent Pi conversation and a scheduler. Pi handles model tu
 
 The main conversation uses Pi's SDK and SessionManager. It loads ordinary tools, configured extensions, project resources, codemode, tool search and MCP. Startup binds extensions without a model request; reset and shutdown close their lifecycle.
 
+With a configured `launcher`, the main conversation instead runs as a launcher-started Pi RPC child, and every job uses the same command. Companion's tools still run in the host. A small extension loaded with `--extension` registers matching proxies and reaches the host through RPC `input` dialogs titled `companion/bridge`. Startup verifies the session identity, model, effort and the proxied tools before use. An unexpected child exit stops the chat until a restart, without respawning; scheduled checks keep running.
+
 Background checks use separate Pi RPC sessions and verify each schedule's model/effort before submission. Anthropic/Claude models work through Pi. The CLI has no Claude executable or Teams-specific integration.
 
 Checks receive their instructions, named context files, their working memory, their recent log lines and a limited previous outcome rather than the main transcript. Each run is a fresh process, so these are all it inherits. Context files must be regular files within the working directory, at most 32 KiB each. The complete supplied context is limited to 64 KiB. This preload rule is not a sandbox: Pi tools retain their configured access.

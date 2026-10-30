@@ -71,6 +71,7 @@ export async function submitPatterns(root, { hash, confirmation, run = runHarnes
         purpose: 'session-patterns',
         cwd: root,
         sessionFile: join(directory, `${jobId}.jsonl`),
+        ...(config.launcher && { launcher: config.launcher }),
         prompt: JSON.stringify({
           scope: {
             from: preview.selection.from,

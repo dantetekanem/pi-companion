@@ -32,7 +32,8 @@ Edit the requested Markdown files under the supplied schedules path. Preserve ti
 
 - `at`: one `"HH:mm"` or 1 to 48 distinct times, such as `["09:00", "12:00", "18:00"]`.
 - `window`: replace `at` with `"window": { "start": "08:00", "end": "17:00", "everyMinutes": 60 }` for ten hourly checks. Start at `start`; include `end` only on the interval. Windows stay within one local day, allow at most 48 checks and never run after the end minute. Do not combine `at` and `window`.
-- Weekly files need `weekday` (0 to 6); monthly files need `day` (1 to 31). Multiple times still count as one schedule.
+- Weekly files need `weekday` (0 to 6), or a list such as `[1, 2, 3, 4, 5]` for weekdays; monthly files need `day` (1 to 31). Multiple times still count as one schedule.
+- One-time reminders or checks go in `once/` with `"date": "YYYY-MM-DD"` (a real local date in the file's timezone; no other folder accepts `date`) and `at` or `window` for that date. "Remind me at 3pm" means today's date in the user's timezone; "in 2 hours" is computed from the current time. Set `enabled` to `true` when the user asked for it, use the background binding from the runtime block, and put the reminder or check in the instructions. It runs once, catches up after downtime at the next tick however late, and never repeats; the dashboard then shows it as done. Do not create a new file to retry unless the user asks.
 
 Consolidate settings directly, retaining requested times and instructions. Validate and report the resulting count without deleting unrelated routines. If settings cannot express the request, explain why and ask before changing application code. Neither another agent nor an initialization workflow is required. Saved settings do not prove execution.
 

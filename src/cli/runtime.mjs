@@ -41,6 +41,7 @@ export class CompanionRuntime {
     this.resetting = false;
     this.closing = false;
     this.fault = null;
+    this.mainFault = null;
   }
 
   static async open(root, config, options) {
@@ -190,6 +191,14 @@ export class CompanionRuntime {
     const unsubscribePrevious = this.unsubscribe;
     this.main = main;
     this.unsubscribe = unsubscribe;
+    this.mainFault = null;
+    // A child Pi that exits unasked ends the chat until a restart; scheduled checks keep running.
+    main.exited?.then(error => {
+      if (error && this.main === main && !this.closing) {
+        this.mainFault = error;
+        this.notify();
+      }
+    });
     if (fresh) this.lastCompaction = null;
     unsubscribePrevious?.();
     if (previous && previous !== main) await closePiSession(previous);
@@ -238,7 +247,7 @@ export class CompanionRuntime {
     try {
       if (ownedTurn) {
         await Promise.allSettled([...ownedTurn.steering]);
-        previous.clearQueue?.();
+        await previous.clearQueue?.();
         this.active.get(ownedTurn.id)?.controller.abort();
         await previous.abort();
         await this.mainWork;
@@ -395,6 +404,7 @@ export class CompanionRuntime {
   async send(text, id = randomUUID()) {
     this.check();
     if (!this.main) throw Error('Main conversation is not connected.');
+    if (this.mainFault) throw Error(`Main chat stopped: ${this.mainFault.message} Restart Companion to reconnect.`);
     if (this.resetting) throw Error('Main conversation is resetting.');
     if (typeof text !== 'string' || !text.trim() || Buffer.byteLength(text) > 65536) throw Error('Message must contain 1–65536 bytes.');
 

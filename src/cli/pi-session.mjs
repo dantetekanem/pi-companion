@@ -2,27 +2,14 @@ import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, wr
 import { randomUUID } from 'node:crypto';
 import { basename, dirname, join, resolve } from 'node:path';
 import { assertRuntimeAdmission, adoptedSession } from './migration/admission.mjs';
-import { pinSession } from './migration/ownership.mjs';
+import { readSessionHeader } from './migration/ownership.mjs';
 import { readSource, sha256 } from './migration/inventory.mjs';
-import { efforts, validateBinding } from './schedules.mjs';
-import { readSettings, updateSettings } from './settings.mjs';
-import { Type } from 'typebox';
-import { Check } from 'typebox/value';
-import { defineTool } from '@earendil-works/pi-coding-agent';
+import { validateBinding } from './schedules.mjs';
 import { createMemoryExtension, createMemoryTool } from './memory.mjs';
 import { createQuestionTool } from './questions.mjs';
-
-const settingsScope = Type.Union(['main', 'background', 'schedules', 'all'].map(value => Type.Literal(value)));
-const settingsEffort = Type.Union([...new Set(Object.values(efforts).flat())].map(value => Type.Literal(value)));
-const settingsParameters = Type.Union([
-  Type.Object({ action: Type.Literal('inspect'), scope: settingsScope }, { additionalProperties: false }),
-  Type.Object({
-    action: Type.Literal('update'),
-    scope: settingsScope,
-    model: Type.Optional(Type.String({ minLength: 3, maxLength: 200 })),
-    effort: Type.Optional(settingsEffort),
-  }, { additionalProperties: false }),
-]);
+import { createScheduleTool, createSettingsTool } from './companion-tools.mjs';
+import { runModelSettings } from './model-settings.mjs';
+import { openRpcSession } from './rpc-session.mjs';
 
 /** Caller holds the conversation reservation until the SDK and its compaction/retries settle. */
 export async function withPiCancellation(session, signal, operation) {
@@ -57,7 +44,7 @@ export async function closePiSession(session) {
   try {
     await session.extensionRunner?.emit({ type: 'session_shutdown', reason: 'exit' });
   } finally {
-    session.dispose();
+    await session.dispose();
   }
 }
 
@@ -70,6 +57,20 @@ export async function openPiSession(
   const adopted = adoptedSession(root);
   const file = mainSessionFile(root, saved, adopted, fresh);
   const expected = fresh ? null : saved ?? adopted;
+  if (config.launcher) {
+    // Every Pi process runs behind the launcher, so its managed extensions and credentials apply.
+    validateBinding({ harness: 'pi', ...config.main });
+    claimSessionFile(file, { fresh, expected });
+    return openRpcSession({
+      root,
+      config,
+      file,
+      expected,
+      askQuestion,
+      triggerSchedule,
+      prompts: mainPrompts(root, config),
+    }, dependencies);
+  }
   return openConversation({
     root,
     config,
@@ -79,6 +80,34 @@ export async function openPiSession(
     customTools: [createQuestionTool(askQuestion), createScheduleTool(triggerSchedule), createMemoryTool(root)],
     modelSettings: { root, config },
   }, dependencies);
+}
+
+function refuseInProcess(config) {
+  if (config.launcher) throw Error('A configured launcher starts every Pi process; none may run in this process.');
+}
+
+function claimSessionFile(file, { fresh, expected }) {
+  mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
+  if (fresh && existsSync(file)) throw Error('Fresh main Pi conversation already exists.');
+  if (!existsSync(file)) {
+    if (expected) throw Error('Saved main Pi conversation is missing; refusing to create a replacement.');
+    closeSync(openSync(file, 'wx', 0o600));
+  }
+  if (!lstatSync(file).isFile()) throw Error('Main Pi conversation must be a regular file.');
+  if (expected && (readSessionHeader(file).sessionId !== expected.sessionId || file !== expected.sessionFile)) {
+    throw Error('Main Pi conversation identity changed.');
+  }
+}
+
+function mainPrompts(root, config) {
+  return ['prompt', 'taste', 'learning-context', 'v2-runtime', 'memory'].map(name =>
+    readFileSync(new URL(`../prompts/${name}.md`, import.meta.url), 'utf8').replace('{{runtime}}', JSON.stringify({
+      root,
+      notes: join(root, 'notes'),
+      schedules: join(root, 'schedules'),
+      main: config.main,
+      background: config.background,
+    }, null, 2)));
 }
 
 function mainSessionFile(root, saved, adopted, fresh) {
@@ -103,25 +132,6 @@ function mainSessionFile(root, saved, adopted, fresh) {
   return file;
 }
 
-function createScheduleTool(triggerSchedule) {
-  const parameters = Type.Object({
-    scheduleId: Type.Optional(Type.String({ minLength: 1, maxLength: 80, pattern: '^[a-z0-9][a-z0-9._-]*$' })),
-  }, { additionalProperties: false });
-  return defineTool({
-    name: 'run_schedule',
-    label: 'Run scheduled check once',
-    description: 'Only on an explicit user request, run one exact native schedule ID now, even if paused or outside its calendar. No settings change. Omit scheduleId to list up to 20 candidates. Returns admission, not completion; results appear in Reports.',
-    parameters,
-    async execute(id, request, signal) {
-      if (!Check(parameters, request)) throw Error('Invalid schedule request.');
-      signal?.throwIfAborted();
-      if (!triggerSchedule) throw Error('Schedule triggering is unavailable.');
-      const details = await triggerSchedule(request.scheduleId, id, signal);
-      return { content: [{ type: 'text', text: JSON.stringify(details) }], details };
-    },
-  });
-}
-
 function currentBinding(session) {
   const model = session.model;
   return {
@@ -130,79 +140,27 @@ function currentBinding(session) {
   };
 }
 
-function syncConfig(config, settings) {
-  if (!settings || typeof settings !== 'object') return;
-  for (const scope of ['main', 'background']) {
-    if (settings[scope] && config[scope]) Object.assign(config[scope], settings[scope]);
-  }
-}
-
 function createModelSettingsTool({ root, config, currentSession, getModelRuntime }) {
-  return defineTool({
-    name: 'model_settings',
-    label: 'Model and effort settings',
-    description: 'Inspect or update model and effort for exactly main, background, schedules, or all. Updates require an installed provider/model reference and persist only Companion settings, never Pi global defaults. Main updates also call this session’s non-persistent SDK setters; the receipt separates saved settings from the observed active binding.',
-    parameters: settingsParameters,
-    async execute(_id, request, signal) {
-      if (!Check(settingsParameters, request)) throw Error('Invalid model settings request.');
-      signal?.throwIfAborted();
-      if (request.action === 'inspect') {
-        const details = {
-          action: 'inspect',
-          scope: request.scope,
-          settings: readSettings(root, request.scope),
-        };
-        if (request.scope === 'main' || request.scope === 'all') {
-          details.activeMainBinding = currentSession.current ? currentBinding(currentSession.current) : null;
-        }
-        return { content: [{ type: 'text', text: JSON.stringify(details) }], details };
-      }
-
-      let result;
+  return createSettingsTool(request => runModelSettings({
+    root,
+    config,
+    request,
+    binding: () => currentSession.current ? currentBinding(currentSession.current) : null,
+    modelRuntime: getModelRuntime,
+    apply: async ({ model, effort }) => {
+      const session = currentSession.current;
+      if (!session) throw Error('The active Pi session is unavailable.');
       try {
-        result = await updateSettings(root, {
-          scope: request.scope,
-          model: request.model,
-          effort: request.effort,
-        }, {
-          modelRuntime: getModelRuntime(),
-          applyCurrent: async ({ model, effort }) => {
-            const session = currentSession.current;
-            if (!session) throw Error('The active Pi session is unavailable.');
-            try {
-              if (model) await session.setModel(model, { persist: false });
-              if (effort !== undefined) session.setThinkingLevel(effort, { persist: false });
-            } catch (error) {
-              const failure = new Error(error instanceof Error ? error.message : String(error));
-              failure.effective = currentBinding(session);
-              throw failure;
-            }
-            return currentBinding(session);
-          },
-        });
+        if (model) await session.setModel(model, { persist: false });
+        if (effort !== undefined) session.setThinkingLevel(effort, { persist: false });
       } catch (error) {
-        result = {
-          scope: request.scope,
-          persisted: {
-            status: 'failed',
-            completed: [],
-            failed: { target: 'preflight', error: error instanceof Error ? error.message : String(error) },
-          },
-          activeRuntime: { status: 'unchanged', reason: 'preflight rejected the update before persistence' },
-        };
+        const failure = new Error(error instanceof Error ? error.message : String(error));
+        failure.effective = currentBinding(session);
+        throw failure;
       }
-      syncConfig(config, result.persisted?.settings);
-      const details = {
-        action: 'update',
-        requested: {
-          ...(request.model === undefined ? {} : { model: request.model }),
-          ...(request.effort === undefined ? {} : { effort: request.effort }),
-        },
-        ...result,
-      };
-      return { content: [{ type: 'text', text: JSON.stringify(details) }], details };
+      return currentBinding(session);
     },
-  });
+  }));
 }
 
 function importedSession(root, sessionId) {
@@ -238,6 +196,7 @@ export async function bindingFromSession(bytes, explicit) {
 }
 
 export async function openImportedPiSession({ root, config, sessionId, binding, saved = false }, dependencies = {}) {
+  refuseInProcess(config);
   const source = importedSession(root, sessionId);
   root = source.root;
   if (adoptedSession(root)?.sessionId === sessionId) throw Error('Reuse the already owned main conversation.');
@@ -261,6 +220,7 @@ async function openConversation(
   { root, config, expected, file, fresh = false, customTools = [], modelSettings },
   { createSession, agentDir, modelRuntime: suppliedModelRuntime } = {},
 ) {
+  refuseInProcess(config);
   validateBinding({ harness: 'pi', ...config.main });
   const {
     SessionManager,
@@ -274,28 +234,12 @@ async function openConversation(
     SettingsManager,
     getAgentDir,
   } = await import('@earendil-works/pi-coding-agent');
-  mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
-  if (fresh && existsSync(file)) throw Error('Fresh main Pi conversation already exists.');
-  if (!existsSync(file)) {
-    if (expected) throw Error('Saved main Pi conversation is missing; refusing to create a replacement.');
-    closeSync(openSync(file, 'wx', 0o600));
-  }
-  if (!lstatSync(file).isFile()) throw Error('Main Pi conversation must be a regular file.');
-  if (expected && (pinSession(file).sessionId !== expected.sessionId || file !== expected.sessionFile)) {
-    throw Error('Main Pi conversation identity changed.');
-  }
+  claimSessionFile(file, { fresh, expected });
   const manager = SessionManager.open(file, dirname(file), config.main.cwd);
   if (expected && manager.getSessionId() !== expected.sessionId) throw Error('Main Pi conversation identity changed.');
   const effectiveAgentDir = agentDir ?? getAgentDir();
   const settingsManager = SettingsManager.create(config.main.cwd, effectiveAgentDir);
-  const appendSystemPrompt = ['prompt', 'taste', 'learning-context', 'v2-runtime', 'memory'].map(name =>
-    readFileSync(new URL(`../prompts/${name}.md`, import.meta.url), 'utf8').replace('{{runtime}}', JSON.stringify({
-      root,
-      notes: join(root, 'notes'),
-      schedules: join(root, 'schedules'),
-      main: config.main,
-      background: config.background,
-    }, null, 2)));
+  const appendSystemPrompt = mainPrompts(root, config);
   const resourceLoader = new DefaultResourceLoader({
     cwd: config.main.cwd,
     agentDir: effectiveAgentDir,

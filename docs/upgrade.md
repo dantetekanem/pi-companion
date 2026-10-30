@@ -32,7 +32,7 @@ Close the old owning Pi process and let its work finish or cancel **before hashi
 
 Use an uninitialized destination. If `~/.companion` already contains a workspace, choose another unused path. Do not run `init` or open that destination before migration finishes.
 
-Keep the saved Pi sessions and installed `@jl1990/pi-scheduler` **0.5.1** with Croner **10.0.1** available. Imported schedules use those pinned helpers; migration does not install them. Select every saved Companion origin, including stopped ones, and choose one main conversation.
+Keep the saved Pi sessions available. If the old home has scheduler records (`~/.pi/agent/state/scheduler/tasks.json`), also keep `@jl1990/pi-scheduler` **0.5.1** with Croner **10.0.1** installed and name it in `schedulerPackage`. Imported schedules use those pinned helpers; migration does not install them. Without scheduler records, omit `schedulerPackage`. Select every saved Companion origin, including stopped ones, and choose one main conversation.
 
 ## 1. Inspect a read-only plan
 
@@ -61,7 +61,7 @@ Create a private `selection.json`, replacing the example paths and bindings:
 }
 ```
 
-The main working directory must match its saved session. Preserve the original session and review providers; choose missing bindings explicitly. Staging replaces the example initialization date with the journal creation time.
+The main working directory must match its saved session. Preserve the original session and review providers; choose missing bindings explicitly. If Pi starts through a wrapper, add `launcher` to `config` (see the README); repair attempts use it too. Staging replaces the example initialization date with the journal creation time.
 
 ```sh
 pi-companion upgrade-plan --selection /absolute/selection.json --home "$companion_home"

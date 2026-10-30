@@ -20,6 +20,11 @@ export function readUpgradeJson(file) {
   }
 }
 const planHash = ({ hash, ...plan }) => sha256(JSON.stringify(plan));
+function openEngine(plan) {
+  const engine = plan.schedulerPackage == null ? null : SchedulerCompatibility.open(plan.schedulerPackage);
+  if (!isDeepStrictEqual(engine?.identity ?? null, plan.engine)) throw Error('Compatibility engine changed since planning.');
+  return engine;
+}
 const planFile = root => join(root, 'migration', 'plan.json');
 const journalFile = root => join(root, 'migration', 'journal.json');
 
@@ -53,13 +58,13 @@ export function planUpgrade(input) {
     tasks = Array.isArray(value) ? value : value.tasks;
     if (!Array.isArray(tasks)) throw Error('Scheduler task shape must be reviewed before planning.');
   }
-  const engine = SchedulerCompatibility.open(input.schedulerPackage);
+  const engine = scheduler || input.schedulerPackage !== undefined ? SchedulerCompatibility.open(input.schedulerPackage) : null;
   const plan = {
     version: 1,
     manifest,
     selection: { sessionId: main.sessionId, sessionFile: main.sessionFile },
-    schedulerPackage: input.schedulerPackage,
-    engine: engine.identity,
+    schedulerPackage: input.schedulerPackage ?? null,
+    engine: engine?.identity ?? null,
     candidates: tasks.map(task => ({
       taskId: task.id,
       sha256: sha256(JSON.stringify(task)),
@@ -99,8 +104,7 @@ export async function prepareUpgrade(root, plan, confirmation) {
   if (plan.version !== 1 || planHash(plan) !== plan.hash) throw Error('Upgrade plan hash changed. Plan again.');
   canonicalControlRoot(plan.manifest.spec.home, plan.options.controlRoot);
   if (existsSync(join(root, 'config.json')) || existsSync(join(root, 'runtime'))) throw Error('Choose a new destination, not an initialized Companion home.');
-  const engine = SchedulerCompatibility.open(plan.schedulerPackage);
-  if (!isDeepStrictEqual(engine.identity, plan.engine)) throw Error('Compatibility engine changed since planning.');
+  openEngine(plan);
   const existing = existsSync(planFile(root)) ? readUpgradeJson(planFile(root)) : null;
   if (existing && !isDeepStrictEqual(existing, plan)) throw Error('Prepared plan changed. Existing originals will not be replaced.');
   if (upgradeStatus(root).phase !== 'verified') verifyInventory(plan.manifest);
@@ -148,8 +152,7 @@ export async function applyUpgrade(root, { confirmation, authorization = {}, fai
       if (!['sourcePath', 'consent', 'maxAttempts', 'retryOf', 'approval'].includes(key)) throw Error(`Unknown repair input: ${key}`);
     }
   }
-  const engine = SchedulerCompatibility.open(plan.schedulerPackage);
-  if (!isDeepStrictEqual(engine.identity, plan.engine)) throw Error('Compatibility engine changed since planning.');
+  const engine = openEngine(plan);
   const journal = await MigrationJournal.open(root, plan.manifest, { selection: plan.selection });
   try {
     return await runUpgrade(journal, { ...plan.options, ...authorization, engine, failpoint });

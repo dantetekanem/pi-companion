@@ -70,7 +70,19 @@ Create a Markdown file in `~/.companion/schedules/daily/`, `weekly/` or `monthly
 Check the approved notes for changes worth acting on. Cite the evidence.
 ```
 
-Set your paths, timezone and model, then enable the file. `model: null` uses Pi's default. The [schedule guide](src/prompts/schedule-setup.md) covers multiple daily times, hourly windows and weekly/monthly settings. Companion reloads edited schedules automatically. Keep the dashboard or headless runner open for checks to run.
+Set your paths, timezone and model, then enable the file. `model: null` uses Pi's default. Weekly files take a `weekday`, or a list such as `[1, 2, 3, 4, 5]` for Monday to Friday.
+
+For a check that runs once, put the file in `once/` with a `date` (`YYYY-MM-DD` in the file's timezone) plus `at` or `window`. If Companion was not running at that time, the check runs as soon as it is, however late. It never runs twice and then shows as done. The [schedule guide](src/prompts/schedule-setup.md) covers multiple daily times, hourly windows and weekly/monthly settings. Companion reloads edited schedules automatically. Keep the dashboard or headless runner open for checks to run.
+
+## Start Pi through a launcher
+
+If Pi must start through a wrapper, for example one that sets up credentials or required extensions, add `launcher` to Companion's `config.json`:
+
+```json
+"launcher": { "command": ["my-pi-launcher", "pi"], "env": { "EXAMPLE_MODE": "1" }, "managedExtensions": true }
+```
+
+Companion then starts every Pi process with that command. The main chat runs as an RPC child (`my-pi-launcher pi --mode rpc`), and checks, reflection, pattern review and repair use the same command. `env` adds variables and rejects credential-like names. Companion passes its own environment through and never reads credentials. Set `managedExtensions` when the launcher loads required extensions and refuses `--no-extensions`. Tool-free jobs then keep their other isolation flags. If the main chat's child exits, Companion says so and keeps running scheduled checks; restart it to reconnect the chat. Without `launcher`, Companion runs `pi` directly, as before.
 
 ## Run without the dashboard
 

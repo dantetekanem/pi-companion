@@ -99,6 +99,7 @@ export async function importSchedules(journal, { ownership, states, sessions, de
       selections.set(decision.taskId, decision);
     }
     const linked = new Map();
+    const skippedWakes = [];
     for (const [origin, state] of origins) {
       for (const receipt of state.stopping ?? []) {
         error(receipt.id, { code: 'stop_incomplete', message: `An unfinished stop in ${origin} must be reconciled before migration.` });
@@ -117,6 +118,11 @@ export async function importSchedules(journal, { ownership, states, sessions, de
       }
       const wake = state.experience?.wake;
       if (!wake) continue;
+      // Without scheduler records, a saved wake was never scheduled; keep a trace instead of blocking.
+      if (!source) {
+        skippedWakes.push({ origin, schedule: wake.schedule ?? null });
+        continue;
+      }
       const candidates = tasks.filter(task => mapped.get(task.sessionFile)?.origin === origin
         && (wake.schedulerId ? task.id === wake.schedulerId : task.prompt === `companion-daily:${wake.token}`));
       if (candidates.length !== 1) {
@@ -193,6 +199,7 @@ export async function importSchedules(journal, { ownership, states, sessions, de
       unrelatedIds,
       scheduleIds: result.scheduleIds,
       validatedScheduleIds: result.validatedScheduleIds,
+      skippedWakes,
       errors: result.errors,
     };
     result.artifacts.push({ ...journal.writeData('imported/schedules/index.json', Buffer.from(JSON.stringify(index)), { replace: true }), kind: 'index' });

@@ -41,7 +41,7 @@ function parseProposal(text, entry) {
 
 /** An agent can propose data, not approve it or loosen migration's completion checks. */
 export async function requestStateRepair(journal, { sourcePath, diagnostics, consent, maxAttempts = 1, retryOf = null,
-  run = runHarness, failpoint = () => {} } = {}) {
+  run = runHarness, failpoint = () => {}, launcher } = {}) {
   const entry = sourceEntry(journal, sourcePath);
   if (!consent?.accepted || consent.sourcePath !== entry.path || consent.sourceSha256 !== entry.sha256
     || consent.binding?.harness !== 'pi' || !consent.binding.model?.includes('/')) throw Error('Explicit source and fully qualified Pi binding consent is required.');
@@ -74,6 +74,7 @@ export async function requestStateRepair(journal, { sourcePath, diagnostics, con
       purpose: 'migration-repair',
       cwd: journal.dataRoot,
       sessionFile: join(sessions, `${attempt.id}.jsonl`),
+      ...(launcher && { launcher }),
       prompt: JSON.stringify(evidence),
     });
   } catch {

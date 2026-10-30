@@ -66,6 +66,26 @@ test('read-only plan and explicit preparation precede a single resumable, source
   await assert.rejects(LegacyOwner.open(legacyRoot, plan.selection), /fenced/);
 });
 
+test('a home without scheduler records migrates without a compatibility engine, and its unscheduled wake does not block', async t => {
+  const h = await fixture(t);
+  const { schedulerPackage: _package, ...selection } = { ...h.selection, decisions: [] };
+  assert.throws(() => planUpgrade(selection), /scheduler package/i);
+  rmSync(join(h.home, '.pi/agent/state'), { recursive: true });
+  const plan = planUpgrade(selection);
+  assert.equal(plan.schedulerPackage, null);
+  assert.equal(plan.engine, null);
+  assert.deepEqual(plan.candidates, []);
+  const prepared = await prepareUpgrade(h.root, plan, plan.hash);
+  const authorization = { offline: { ...h.options.offline, migrationId: prepared.migrationId, fingerprint: prepared.fingerprint } };
+  const result = await applyUpgrade(h.root, { confirmation: prepared.migrationId, authorization });
+  assert.equal(result.status, 'verified');
+  assert.equal(result.scheduleCount, 0);
+  const index = JSON.parse(readFileSync(join(result.root, 'imported/schedules/index.json'), 'utf8'));
+  assert.deepEqual(index.skippedWakes, [{ origin: h.options.sessions[0].origin, schedule: '24h' }]);
+  assert.equal(readFileSync(h.stateFile, 'utf8'), JSON.stringify(h.state));
+  assert.equal(legacyIsFenced(join(h.home, '.pi/agent/companion')), true);
+});
+
 test('CLI plan/status are finite and plain activation is rejected without staging or mutation', realEngine, async t => {
   const h = await fixture(t);
   const file = join(h.home, 'selection.json');

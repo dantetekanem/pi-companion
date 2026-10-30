@@ -66,11 +66,9 @@ export function createMemoryTool(root) {
   });
 }
 
+export const memorySection = items => `## Current memory\n\n${items.length ? bulletList(items) : 'Memory is empty.'}`;
+
 /** Read each turn so a change or a hand edit applies without a restart. */
 export const createMemoryExtension = root => pi => {
-  pi.on('before_agent_start', event => {
-    const items = readMemory(root);
-    const section = `## Current memory\n\n${items.length ? bulletList(items) : 'Memory is empty.'}`;
-    return { systemPrompt: `${event.systemPrompt}\n\n${section}` };
-  });
+  pi.on('before_agent_start', event => ({ systemPrompt: `${event.systemPrompt}\n\n${memorySection(readMemory(root))}` }));
 };

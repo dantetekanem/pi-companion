@@ -295,6 +295,12 @@ const jobDetails = (run, clock) => {
   ].filter(Boolean).join(muted(' · '));
 };
 const weekdays = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const weekdayLabel = weekday => {
+  if (weekday == null) return '';
+  const days = [weekday].flat().toSorted((a, b) => a - b);
+  const consecutive = days.length > 2 && days.every((day, index) => day === days[0] + index);
+  return consecutive ? `${weekdays[days[0]]}–${weekdays[days.at(-1)]}` : days.map(day => weekdays[day]).join(', ');
+};
 const scheduleWhen = (schedule, clock) => {
   const zone = schedule.timezone ? new Intl.DateTimeFormat('en-US', {
     timeZone: schedule.timezone, timeZoneName: 'shortGeneric',
@@ -306,13 +312,14 @@ const scheduleWhen = (schedule, clock) => {
     : `${Array.isArray(schedule.at) ? schedule.at.join(', ') : schedule.at} ${zone}`;
   return [
     schedule.cadence,
-    schedule.weekday == null ? '' : weekdays[schedule.weekday],
+    schedule.date,
+    weekdayLabel(schedule.weekday),
     schedule.day == null ? '' : `day ${schedule.day}`,
     times,
   ].filter(Boolean).join(' · ');
 };
 const lifecycleLabels = {
-  completed: 'Completed', failed: 'Failed', cancelled: 'Cancelled', expired: 'Expired',
+  done: 'Done', completed: 'Completed', failed: 'Failed', cancelled: 'Cancelled', expired: 'Expired',
   paused: 'Paused', pending: 'Awaiting scheduler', blocked: 'Invalid schedule',
 };
 const scheduleStatus = ({ schedule, jobs, live, clock, frame }) => {
@@ -334,7 +341,7 @@ const scheduleStatus = ({ schedule, jobs, live, clock, frame }) => {
 };
 const scheduleLines = ({ schedules, counts, diagnostics, activeRuns, live, inner, clock, frame }) => {
   const totals = [
-    `${counts.daily ?? 0} daily`, `${counts.weekly ?? 0} weekly`, `${counts.monthly ?? 0} monthly`,
+    `${counts.daily ?? 0} daily`, `${counts.weekly ?? 0} weekly`, `${counts.monthly ?? 0} monthly`, `${counts.once ?? 0} once`,
     counts.compatibility ? `${counts.compatibility} migrated` : '',
   ].filter(Boolean).join(' · ');
   const content = [muted(totals), ''];
@@ -395,7 +402,7 @@ const scheduleLines = ({ schedules, counts, diagnostics, activeRuns, live, inner
       ...wrapTextWithAnsi(jobDetails(run, clock), inner - 2).map(value => `  ${value}`),
     );
   }
-  if (!schedules.length) content.push(dim('No schedules yet. Add a file to schedules/daily, weekly or monthly.'));
+  if (!schedules.length) content.push(dim('No schedules yet. Add a file to schedules/daily, weekly, monthly or once.'));
   return content;
 };
 const toolState = (state, frame) => {
