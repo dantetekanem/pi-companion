@@ -1,25 +1,20 @@
 # Update or migrate Companion
 
-## Choose your path
+Already using `pi-companion`? Update it in place. Moving from `/companion` inside Pi? Use the one-time migration below. To resume an interrupted migration, keep its workspace and journal and return to [Apply or resume](#3-apply-or-resume).
 
-- Already running the standalone `pi-companion` CLI? Update the code and reopen the same workspace. Do not run the legacy migration again.
-- Moving from `/companion` inside a Pi session? Follow the one-time migration below to import its saved conversations, schedules, notes and reports.
-
-If a migration is unfinished, keep its destination and journal and continue at [Apply or resume](#3-apply-or-resume).
-
-The CLI uses `--home` when supplied, otherwise `COMPANION_HOME`, otherwise `~/.companion`. Set the workspace once for the commands in this guide:
+Use the same workspace throughout:
 
 ```sh
 companion_home="${COMPANION_HOME:-$HOME/.companion}"
 ```
 
-If you use a custom workspace, set `companion_home` to that same absolute path. Keep passing `--home "$companion_home"` on later launches too, unless `COMPANION_HOME` already points there. Use the workspace root, not its internal activated data directory.
+For a custom workspace, set this variable to its absolute path. `--home` overrides `COMPANION_HOME`, which otherwise defaults to `~/.companion`. Pass the workspace root, not an internal activated-data directory.
 
 ## Already using the CLI
 
-1. Close the CLI with Ctrl+C, or stop its headless runner through the supervisor you use.
-2. Update the same package installation or checkout that provides your `pi-companion` command. If it already points to the updated checkout, reopening is enough. Keep the workspace, configuration, schedules, history and usage records in place.
-3. Check the saved workspace, then reopen it:
+1. Close the dashboard with Ctrl+C or stop your headless runner through its supervisor.
+2. Update the package installation or checkout that supplies your command. Keep the workspace and its data. If the command already points to the updated checkout, just reopen it.
+3. Check saved state, then launch:
 
 ```sh
 pi-companion status --plain --home "$companion_home"
@@ -27,21 +22,21 @@ pi-companion schedules --home "$companion_home"
 pi-companion --home "$companion_home"
 ```
 
-The first two commands are local reads; opening the dashboard starts its runner. Reopening does not reimport history or reset the workspace. Resolve any reported configuration errors rather than initializing a replacement home.
+The first two commands only read local state; the third starts the runner. Do not rerun migration or replace the workspace to resolve configuration errors.
 
 ## Legacy Pi extension: before planning
 
-Migration can copy private histories and change old scheduler records. Installing the package, opening the dashboard, listing schedules and plain output never start it.
+Migration copies private history and disables selected old scheduler tasks. Installation and ordinary CLI commands never start it.
 
-Close the old owning Pi process and let its admitted work finish or cancel. `/companion stop` also pauses routines; use it only if you want those pauses preserved in v2. Shutdown can change saved files, so do this before taking source hashes. Do not delete its locks or infer shutdown from a pane name. The CLI does not kill an old process for you.
+Close the old owning Pi process and let its work finish or cancel **before hashing sources**. `/companion stop` also pauses routines; use it only if you want those pauses preserved. A saved pane or owner file does not prove the process stopped. Do not delete its locks.
 
-For a new migration, use an uninitialized destination, normally `~/.companion`. If that workspace is already initialized, choose a different unused absolute path and set `companion_home` to it; do not merge into or replace the existing workspace. Do not run `init` or open the new dashboard before migration finishes. Keep the old Pi session files and installed `@jl1990/pi-scheduler` **0.5.1** with Croner **10.0.1** available. Compatibility schedules use pinned pure helpers from that installation; the CLI does not install or upgrade them.
+Use an uninitialized destination. If `~/.companion` already contains a workspace, choose another unused path. Do not run `init` or open that destination before migration finishes.
 
-Choose every saved Pi session corresponding to an existing Companion origin, including stopped origins. Choose one as the main conversation. Historical owner files are provenance, not proof that a process is stopped.
+Keep the saved Pi sessions and installed `@jl1990/pi-scheduler` **0.5.1** with Croner **10.0.1** available. Imported schedules use those pinned helpers; migration does not install them. Select every saved Companion origin, including stopped ones, and choose one main conversation.
 
 ## 1. Inspect a read-only plan
 
-Create a private `selection.json` with this shape, replacing all example paths and bindings:
+Create a private `selection.json`, replacing the example paths and bindings:
 
 ```json
 {
@@ -66,17 +61,13 @@ Create a private `selection.json` with this shape, replacing all example paths a
 }
 ```
 
-Companion does not impose an execution timeout. Historical `timeoutMs` metadata may remain in saved configuration and imported records without cutting off execution; originals are preserved. Dashboard scheduled jobs support manual `k` cancellation. Migration repair is not a dashboard job and has no `k` cancellation control.
-
-The main working directory must match the selected saved session. Preserve the original session/review provider and intended binding. Missing saved bindings require an explicit choice; the importer will not guess or disclose a conversation to a different provider. The placeholder initialization date is replaced with the journal creation time when staging.
+The main working directory must match its saved session. Preserve the original session and review providers; choose missing bindings explicitly. Staging replaces the example initialization date with the journal creation time.
 
 ```sh
 pi-companion upgrade-plan --selection /absolute/selection.json --home "$companion_home"
 ```
 
-This only reads. It returns the source manifest, saved-session pins, engine pins and candidate scheduler metadata. It does not copy sources, start a model or change the old scheduler.
-
-For every task in a mapped session, add a decision to `selection.json`, using its exact candidate hash and mapped origin:
+Planning reads sources without copying them, starting a model or changing the scheduler. It returns source hashes, session and engine pins, and candidate tasks. Add a decision for every task in a mapped session using its exact hash and origin:
 
 ```json
 {
@@ -89,9 +80,9 @@ For every task in a mapped session, add a decision to `selection.json`, using it
 }
 ```
 
-Use `unrelated` only for work that does not belong to Companion. A matching title is not proof of ownership. A task referenced by a saved pause, stop or daily wake cannot be excluded. Once, interval, cron, shell, notify and message actions remain compatibility records rather than being approximated as calendar schedules. Intervals continue to reschedule from completion; cron preserves the explicit original timezone.
+Use `unrelated` only for tasks outside Companion; titles alone do not establish ownership. Tasks referenced by a saved pause, stop or daily wake cannot be excluded. Imported one-time, interval, cron, shell, notify and message actions keep their original behavior. Intervals reschedule from completion; cron keeps its explicit timezone.
 
-Run planning again with the completed decisions. Save that exact output as private `plan.json`. Inspect the complete plan and its `hash`. If original review settings are needed, select the settings file in `references` with kind `review-settings` and provide its exact `path`, `size`, and `sha256` in `reviewSettings`. The runtime never discovers settings or private sessions on your behalf.
+Run planning again, inspect the complete result and save it as private `plan.json`. Keep its `hash`. If review settings are required, select their file in `references` as `review-settings`, then supply its exact `path`, `size` and `sha256` in `reviewSettings`. Companion does not discover private sessions or settings for you.
 
 ## 2. Prepare private metadata
 
@@ -100,11 +91,11 @@ pi-companion upgrade-prepare --selection /absolute/plan.json --confirm PLAN_HASH
 pi-companion upgrade-status --home "$companion_home"
 ```
 
-Preparation checks source and engine pins, creates the private journal and saves the reviewed plan. It does not yet copy sources or disable tasks. The response includes the migration ID and source fingerprint. A changed plan cannot replace an existing one implicitly.
+Preparation checks the pins and saves the reviewed plan and private journal. It returns a migration ID and source fingerprint without copying sources or disabling tasks. A changed plan cannot silently replace it.
 
 ## 3. Apply or resume
 
-For owners using the new lease protocol, a stopped receipt must exist for every mapped origin. For older owners, supply a private authorization file attesting that all mapped owners are already offline:
+Owners using the lease protocol must have a stopped receipt for every mapped origin. For older owners, provide a private authorization file confirming they are offline:
 
 ```json
 {
@@ -118,15 +109,15 @@ For owners using the new lease protocol, a stopped receipt must exist for every 
 }
 ```
 
-This is your attestation, not a process probe. A held owner lease still blocks the operation. The session set must match exactly.
+This records your confirmation; it does not inspect processes. The session set must match exactly, and a held owner lease still blocks migration.
 
 ```sh
 pi-companion upgrade-apply --confirm MIGRATION_ID --selection /absolute/authorization.json --home "$companion_home"
 ```
 
-Apply installs the legacy startup fence, proves shutdown, stages byte-preserved originals, inspects a disposable copy of any Durable checkpoint, and validates every origin and owned schedule. Only then does it disable selected old records under the scheduler's lock and activate one destination. Unrelated records and unknown metadata survive. The original registry, notes, report feed, state files and mapped sessions remain available with their provenance; only the selected old scheduler records are disabled.
+Apply checks shutdown evidence, prevents legacy startup, stages preserved originals and validates every origin and schedule. It then disables selected old tasks under the scheduler lock and activates the destination. Unrelated tasks, unknown metadata and original source files remain intact. Durable checkpoint inspection uses a disposable copy.
 
-The journal advances through `inventory`, `staged`, `fencing`, `fenced`, `committed`, and `verified`. A failure is not partial success. Leave its files in place, inspect the diagnostics, resolve the reported blocker and repeat the same apply command. Never replace originals, delete the fence or reset the journal to force progress. Source drift requires reconciliation; there is no automatic rollback or discard command.
+The journal records `inventory`, `staged`, `fencing`, `fenced`, `committed` and `verified`. On failure, keep its files, resolve the reported error and repeat the same command. Do not delete the fence, reset the journal or replace originals. Source changes require reconciliation; there is no automatic rollback or discard command.
 
 ## 4. Verify and open the migrated workspace
 
@@ -137,28 +128,30 @@ pi-companion schedules --home "$companion_home"
 pi-companion history --home "$companion_home"
 ```
 
-Check that upgrade status reports `phase: "verified"`, all expected schedules and paused states are present, and history lists the imported origins and archive paths. These commands do not start providers or run checks.
-
-Then open that same workspace:
+Check for `phase: "verified"`, expected schedules and paused states, and imported origins and archive paths. These commands do not start providers or checks. Then launch:
 
 ```sh
 pi-companion --home "$companion_home"
 ```
 
-Startup resolves its `active.json` to the activated data directory without repeating the upgrade. Open Reports to inspect the imported reports. Repeating apply verifies the activation rather than re-disabling schedules. Historical cost estimates remain separate from v2 spend. An imported schedule is not proof that its next live check has succeeded.
+Startup follows `active.json` without repeating migration. Open Reports to inspect imported results. Repeating apply verifies the existing activation rather than disabling tasks again. Historical costs stay separate from new usage. Migration verification does not prove a live check succeeded.
+
+Historical `timeoutMs` fields are preserved but do not impose execution deadlines. Use `k` for running dashboard jobs; migration repair has no dashboard cancellation shortcut.
 
 ## Agent checklist
 
-- Identify whether this is an existing CLI update, a new legacy migration, or a resume. Record the exact workspace root and use it in every command.
-- For a CLI update, preserve that workspace and follow [Already using the CLI](#already-using-the-cli); do not run `upgrade-prepare` or `upgrade-apply`.
-- For an authorized legacy migration, identify every saved origin and session, the main conversation, original model/provider bindings, and each task's ownership. Preserve stopped and paused states; do not infer ownership from titles.
-- Close the old owner before hashing sources. Run the read-only plan, complete task decisions, and save the exact reviewed plan and hash.
-- Prepare using that hash; apply using the returned migration ID and actual shutdown evidence. If interrupted, inspect status and resume the same journal rather than creating another destination.
-- Verify the phase, schedules and imported history with the commands above. Report the workspace, what was preserved, any unresolved errors, and whether a live check was actually exercised. Do not report migration verification as live collection success.
+- Identify update, migration or resume; use one workspace root throughout.
+- For CLI updates, preserve the workspace and skip migration commands.
+- For migration, identify all origins, task ownership and original model/provider bindings. Preserve stops and pauses.
+- Stop the old owner before hashing. Review and save the complete plan, then prepare with its hash.
+- Apply with the returned migration ID and actual shutdown evidence. Resume the same journal after interruption.
+- Verify status, schedules and history. Report unresolved errors and whether any live check was actually run.
 
 ## Optional bounded state repair
 
-State JSON errors can be proposed to a no-tools Pi model only with exact source/provider consent. Ownership, schedule attribution, active attempts and uncertain stop state require human decisions. Add a `repair` object to the authorization file only when you intend that provider call:
+A no-tools Pi model can propose a correction to one malformed state JSON file with explicit source/provider consent. Ownership, task attribution, active attempts and uncertain stop states still require human decisions.
+
+To request a proposal, add this `repair` value to the authorization file, retaining any required offline evidence:
 
 ```json
 {
@@ -173,7 +166,7 @@ State JSON errors can be proposed to a no-tools Pi model only with exact source/
 }
 ```
 
-Apply returns `repair_review` (exit code 2) with the proposal, attempt ID, cost and proposal hash. It does not approve or activate the proposal. After reviewing its complete value and stop/control fields, replace the request with:
+Apply returns `repair_review` (exit code 2), the proposal, attempt ID, cost and proposal hash. It does not activate the proposal. Review the full value, including stop/control fields, then replace `repair` with:
 
 ```json
 {
@@ -187,6 +180,6 @@ Apply returns `repair_review` (exit code 2) with the proposal, attempt ID, cost 
 }
 ```
 
-Both examples are values of the authorization file's `repair` field; retain its offline evidence when required. Accepted replacements affect only converted staging, retain the raw original bytes, and pass ordinary import and full schedule validation again. Parseable original control fields cannot change. Malformed originals need explicit control review; valid replacement JSON is not proof of correct meaning.
+Approved repairs change staging only and must pass import and schedule validation. Original bytes remain intact; parseable control fields cannot change. Valid JSON alone does not establish correct meaning.
 
-Attempts are reserved before dispatch. Interrupted attempts are not replayed. A completed invalid attempt can be retried only by naming `retryOf` within the originally consented budget of at most three attempts. The review source is limited to 32 KiB, and repair receipts contribute to v2's estimated cost. These are not spending guarantees.
+Attempts are reserved before dispatch. Interrupted attempts are not replayed. A completed invalid attempt needs `retryOf` and remaining consented budget, at most three attempts. Sources are limited to 32 KiB; repair costs count toward the CLI estimate. Neither limit guarantees spending.

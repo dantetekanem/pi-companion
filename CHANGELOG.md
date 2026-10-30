@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.1.5 - 2026-10-29
+
+- Add the standalone `pi-companion` CLI with persistent chat, Markdown reports, live job tabs and Pi themes.
+- Define daily, weekly and monthly checks in editable Markdown files. Run them through Pi with configured tools, extensions and MCP servers.
+- Show running checks and their output; use `k` to cancel a selected job. Jobs have no automatic execution deadline.
+- Add resumable migration from the Pi extension, preserving saved conversations, schedules, history and paused states.
+- Make `/reset` start a fresh conversation and zero the displayed cost estimate without deleting history or stopping background checks.
+- Fix concurrent legacy-owner startup and retry after scheduler setup failures.
+- Shorten the README, guides and agent prompts; add the CLI screenshot and migration instructions for users and agents.
+
 ## 0.1.4 - 2026-09-11
 
 - Save Companion's Herdr pane and workspace to a temporary location file on start.

@@ -1,6 +1,6 @@
 {
   "name": "pi-companion",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "private": true,
   "type": "module",
   "description": "A chat-first Companion CLI with recurring Pi checks and a persistent Pi conversation.",

@@ -1,6 +1,6 @@
 # Schedule files
 
-Put one Markdown file in `daily/`, `weekly/` or `monthly/`. No agent registers it. Use JSON between the opening `---` lines, followed by the task instructions:
+Put one Markdown file in `daily/`, `weekly/` or `monthly/`. Use JSON between the opening `---` lines, then the task instructions. No registration step is needed.
 
 ```markdown
 ---
@@ -20,18 +20,26 @@ Put one Markdown file in `daily/`, `weekly/` or `monthly/`. No agent registers i
 Summarize useful changes in the approved notes. Cite the evidence and leave completed work alone.
 ```
 
-Change the working directory, timezone and context paths to your own. Context paths are relative to `cwd`. Keep private material within its approved provider scope. Set `enabled` to `true` when the instructions, access and timing are ready. `model: null` uses Pi's configured default; an explicit Pi-supported provider/model is not silently replaced. The active harness is always Pi, including when the selected model is Anthropic/Claude.
+Set your working directory, timezone and context paths; context paths are relative to `cwd`. Keep material within its approved provider scope. Enable the file when instructions, access and timing are ready. Preserve paused state during edits unless enabling was requested.
 
-For several checks on the same day, set `"at": ["09:00", "12:00", "18:00"]` in that one file. A list holds 1 to 48 unique `HH:mm` times; the single-string form still works. One file counts as one schedule regardless of its number of times. After downtime, only the latest due time on the current local date is eligible, not every missed check. Editing the file does not require a code change, agent registration or restart. Preserve `enabled: false` when changing a paused routine unless enabling it was requested.
+`model: null` uses Pi's configured default. Explicit provider/model bindings are never silently replaced. Checks use Pi, including when configured with an Anthropic/Claude model. Supported efforts are `off`, `minimal`, `low`, `medium`, `high` and `xhigh`; the selected model must support the choice.
 
-For an hourly check between 08:00 and 17:00, replace `at` with:
+## Timing
+
+Use one `HH:mm` time or 1 to 48 unique times, such as `"at": ["09:00", "12:00", "18:00"]`. After downtime, only the latest due time on the current local date is eligible.
+
+For hourly checks between 08:00 and 17:00, replace `at` with:
+
 ```json
 "window": { "start": "08:00", "end": "17:00", "everyMinutes": 60 }
 ```
-This is one schedule with ten checks, not ten files. The interval starts at `start`; `end` is included only if it lands on that interval. Both times use the schedule's timezone on the same day; overnight windows are rejected. `everyMinutes` is an integer from 1 to 1440, with at most 48 checks per day. Use either `at` or `window`, never both. After downtime, only the latest due check inside the window is eligible; nothing starts after its end minute.
 
-Weekly files also need `"weekday": 1` (Sunday is 0, Saturday is 6). Monthly files need `"day": 1` (1–31); a day absent from a month is skipped. Local times use the named timezone. A repeated daylight-saving time runs once; nonexistent local times are skipped. IDs must be unique across all three folders.
+This schedules ten checks in one file. The interval starts at `start`; it includes `end` only when that time falls on the interval. Windows use one local day, cannot cross midnight, and accept an integer `everyMinutes` from 1 to 1440, with at most 48 checks. Use either `at` or `window`. After downtime, only the latest due check inside the window is eligible; none starts after its end minute.
 
-Use `pi-companion schedules` to validate and list files. Initialization and listing do not call a model. The runner must be active for checks to execute; merely writing a file is not proof that a check ran. An existing schedule still bound to the native Claude harness stays on disk with a per-file parse error and is excluded from execution. Saved config and history remain readable. An external supervisor can manage the headless runner; Companion does not install one.
+Weekly files also need `"weekday": 1` (Sunday 0 through Saturday 6). Monthly files need `"day": 1` (1 to 31); missing dates are skipped. All times use the named timezone. Repeated daylight-saving times run once; nonexistent times are skipped. IDs must be unique across folders.
 
-Use a Pi effort supported by the selected model: `off`, `minimal`, `low`, `medium`, `high` or `xhigh`. Unsupported settings must fail visibly rather than downgrade.
+## Validate and run
+
+`pi-companion schedules` lists files and validation errors without calling a model. Initialization also needs no model. Editing files requires neither code changes nor a restart. One file counts as one schedule, regardless of its times.
+
+Keep the dashboard or headless runner active for checks to execute. A saved file does not prove a check ran. An external supervisor can manage the runner; Companion does not install one. Old non-Pi harness bindings remain on disk but fail validation; saved configuration and history remain readable.
